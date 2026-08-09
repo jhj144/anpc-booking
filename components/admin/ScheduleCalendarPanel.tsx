@@ -24,7 +24,7 @@ export function ScheduleCalendarPanel({ onAddAvailable, onAddBlocked }: Schedule
   const [startTime, setStartTime] = useState("10:00");
   const [endTime, setEndTime] = useState("18:00");
 
-  const [isFullDay, setIsFullDay] = useState(true);
+  const [blockedDays, setBlockedDays] = useState<Set<number>>(new Set());
   const [blockStartTime, setBlockStartTime] = useState("10:00");
   const [blockEndTime, setBlockEndTime] = useState("18:00");
   const [reason, setReason] = useState("");
@@ -40,9 +40,19 @@ export function ScheduleCalendarPanel({ onAddAvailable, onAddBlocked }: Schedule
     });
   }
 
+  function toggleBlockedDay(day: number) {
+    setBlockedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(day)) next.delete(day);
+      else next.add(day);
+      return next;
+    });
+  }
+
   const hasStart = Boolean(startDate);
   const canSubmitAvailable = hasStart && selectedDays.size > 0;
-  const canSubmitBlocked = hasStart && (isFullDay || (blockStartTime && blockEndTime && blockStartTime < blockEndTime));
+  const canSubmitBlocked =
+    hasStart && blockedDays.size > 0 && Boolean(blockStartTime && blockEndTime && blockStartTime < blockEndTime);
 
   function handleSubmitAvailable() {
     if (!canSubmitAvailable) return;
@@ -62,7 +72,7 @@ export function ScheduleCalendarPanel({ onAddAvailable, onAddBlocked }: Schedule
     const formData = new FormData();
     formData.set("range_start_date", startDate!);
     formData.set("range_end_date", endDate ?? startDate!);
-    if (isFullDay) formData.set("is_full_day", "on");
+    blockedDays.forEach((day) => formData.set(`day-${day}`, "on"));
     formData.set("start_time", blockStartTime);
     formData.set("end_time", blockEndTime);
     formData.set("reason", reason);
@@ -164,38 +174,43 @@ export function ScheduleCalendarPanel({ onAddAvailable, onAddBlocked }: Schedule
         </div>
       ) : (
         <div className="space-y-3">
-          <label className="flex items-center gap-2 text-sm text-navy">
-            <input
-              type="checkbox"
-              checked={isFullDay}
-              onChange={(e) => setIsFullDay(e.target.checked)}
-              className="h-4 w-4 rounded border-border accent-navy"
-            />
-            하루 종일
-          </label>
-          {!isFullDay && (
-            <div className="flex items-end gap-3">
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">시작</label>
-                <input
-                  type="time"
-                  value={blockStartTime}
-                  onChange={(e) => setBlockStartTime(e.target.value)}
-                  className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
-              <span className="pb-2 text-sm text-gray-400">~</span>
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">종료</label>
-                <input
-                  type="time"
-                  value={blockEndTime}
-                  onChange={(e) => setBlockEndTime(e.target.value)}
-                  className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">요일 (복수 선택)</label>
+            <div className="flex flex-wrap gap-3">
+              {WEEKDAY_LABELS.map((label, day) => (
+                <label key={day} className="flex items-center gap-1.5 text-sm text-navy">
+                  <input
+                    type="checkbox"
+                    checked={blockedDays.has(day)}
+                    onChange={() => toggleBlockedDay(day)}
+                    className="h-4 w-4 rounded border-border accent-navy"
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
-          )}
+          </div>
+          <div className="flex items-end gap-3">
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">시작</label>
+              <input
+                type="time"
+                value={blockStartTime}
+                onChange={(e) => setBlockStartTime(e.target.value)}
+                className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
+              />
+            </div>
+            <span className="pb-2 text-sm text-gray-400">~</span>
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">종료</label>
+              <input
+                type="time"
+                value={blockEndTime}
+                onChange={(e) => setBlockEndTime(e.target.value)}
+                className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
+              />
+            </div>
+          </div>
           <div>
             <label className="mb-1 block text-xs text-gray-500">사유 (선택)</label>
             <input

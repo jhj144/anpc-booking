@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/supabase/dal";
 import { createClient } from "@/lib/supabase/server";
-import { eachDateInRange } from "@/lib/dates";
+import { eachDateInRange, dayOfWeek } from "@/lib/dates";
 
 const DAY_COUNT = 7;
 
@@ -54,22 +54,31 @@ export async function addBlockedRange(formData: FormData) {
 
   const rangeStartDate = String(formData.get("range_start_date") ?? "");
   const rangeEndDate = String(formData.get("range_end_date") ?? "");
-  const isFullDay = formData.get("is_full_day") === "on";
   const startTime = String(formData.get("start_time") ?? "");
   const endTime = String(formData.get("end_time") ?? "");
   const reason = String(formData.get("reason") ?? "").trim() || null;
 
   if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) return;
-  if (!isFullDay && (!startTime || !endTime || startTime >= endTime)) return;
+  if (!startTime || !endTime || startTime >= endTime) return;
 
-  const rows = eachDateInRange(rangeStartDate, rangeEndDate).map((date) => ({
-    admin_id: user.id,
-    block_date: date,
-    is_full_day: isFullDay,
-    start_time: isFullDay ? null : startTime,
-    end_time: isFullDay ? null : endTime,
-    reason,
-  }));
+  const days = new Set<number>();
+  for (let day = 0; day < DAY_COUNT; day++) {
+    if (formData.get(`day-${day}`) === "on") days.add(day);
+  }
+  if (days.size === 0) return;
+
+  const rows = eachDateInRange(rangeStartDate, rangeEndDate)
+    .filter((date) => days.has(dayOfWeek(date)))
+    .map((date) => ({
+      admin_id: user.id,
+      block_date: date,
+      is_full_day: false,
+      start_time: startTime,
+      end_time: endTime,
+      reason,
+    }));
+
+  if (rows.length === 0) return;
 
   await supabase.from("blocked_slots").insert(rows);
 
