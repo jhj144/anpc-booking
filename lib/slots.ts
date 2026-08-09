@@ -44,6 +44,9 @@ export interface AvailabilityInput {
 /** 'yyyy-MM-dd' -> ['HH:mm', ...] 형태의 예약 가능 시간 맵 */
 export type AvailabilityMap = Record<string, string[]>;
 
+/** 슬롯 시작 시각 간격. 미팅 진행시간(duration)과 무관하게 항상 1시간 단위로 시작시간을 제공한다. */
+const SLOT_INTERVAL_MINUTES = 60;
+
 export function getAvailableSlots(input: AvailabilityInput): AvailabilityMap {
   const rangeStart =
     input.viewStartDate > input.linkRangeStartDate ? input.viewStartDate : input.linkRangeStartDate;
@@ -85,7 +88,7 @@ export function getAvailableSlots(input: AvailabilityInput): AvailabilityMap {
       let cursor = rangeStartTime;
       while (addMinutesToTime(cursor, input.durationMinutes) <= rangeEndTime) {
         daySlots.push(cursor);
-        cursor = addMinutesToTime(cursor, input.durationMinutes);
+        cursor = addMinutesToTime(cursor, SLOT_INTERVAL_MINUTES);
       }
     }
 
