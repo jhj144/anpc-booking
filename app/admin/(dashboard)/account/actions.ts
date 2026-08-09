@@ -19,10 +19,13 @@ export async function changePassword(
   }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { error } = await supabase.auth.updateUser({ password });
 
   if (error) {
-    return { error: "비밀번호 변경 중 문제가 발생했습니다." };
+    return { error: `비밀번호 변경 중 문제가 발생했습니다. (user: ${user ? user.email : "없음"}, ${error.message})` };
   }
 
   return { success: true };
