@@ -210,13 +210,79 @@
    전체 셋업 순서를 문서화함. Resend 환경변수는 배포 버튼의 필수 입력에서 제외하고
    "선택 기능"으로 별도 안내(필수로 걸어두면 계정 없는 사람이 배포 자체를 못 하게 됨).
 
+## 7단계 — 배포 후 로그인 불가 사태 해결 (전부 완료, 가장 중요한 세션)
+
+사용자가 실제로 Vercel 배포 버튼을 눌러 배포를 완료한 뒤 로그인이 계속 안 된다고 해서
+디버깅함. 최종적으로 비밀번호 문제가 아니라 **배포 시 입력한 Supabase 키가 잘못된
+포맷**이었던 것으로 확인됨:
+
+1. **증상**: 배포된 사이트(`anpc-booking.vercel.app`)에서 로그인 시도 시 계속
+   "이메일 또는 비밀번호가 올바르지 않습니다"만 뜸. 사용자는 비밀번호를 잊어버린 줄
+   알고 Supabase Studio(Authentication → Users → 해당 유저 → Send password recovery)로
+   재설정 이메일을 보냈으나, **이 앱에는 recovery 콜백/새 비밀번호 설정 화면이 없어서
+   링크를 클릭하면 그냥 세션만 생기고 로그인되어버리는 문제**를 발견함. 그래서
+   `/admin/mypage`(구 `/admin/account`)에 비밀번호 변경 기능을 급히 추가해서 새
+   비밀번호를 설정하게 함.
+2. **비밀번호 변경 자체도 한 번에 안 됨**: 처음엔 "New password should be different
+   from the old password" 에러가 남 → 이걸 보고 사용자가 "원래 비밀번호가 맞았구나"를
+   깨달음. 다른 비밀번호로 바꾸지 않고 원래 비밀번호로 로그인 시도 → **여전히 실패,
+   이번엔 에러 메시지에 `(401 Invalid API Key)`가 찍힘.** (로그인 액션에 임시로
+   `error.status`/`error.message`를 노출시켜서 알아냄 — 평소엔 절대 이렇게 노출하면
+   안 되고, 원인 파악 후 바로 되돌림.)
+3. **근본 원인**: Vercel 환경변수 `NEXT_PUBLIC_SUPABASE_ANON_KEY`와
+   `SUPABASE_SERVICE_ROLE_KEY`에 **구버전 JWT 형식 키(`eyJhbGci...`로 시작)**가
+   들어가 있었음. 이 Supabase 프로젝트는 신버전 키(`sb_publishable_...`,
+   `sb_secret_...`)를 쓰는 프로젝트라 구버전 키가 무효화되어 있어서 모든 Supabase
+   API 호출이 401로 실패했던 것. `.env.local`에는 처음부터 올바른 신버전 키가 있었으므로
+   **로컬 개발 환경은 한 번도 이 문제를 겪지 않았고, 오직 Vercel 배포본만 영향받음**
+   (아마 최초 배포 버튼 클릭 시 Supabase 대시보드의 "Legacy anon, service_role API
+   keys" 탭 값을 잘못 복사해 넣었을 가능성이 높음).
+   - Vercel Environment Variables UI에서 "Sensitive" 값은 절대 다시 읽을 수 없고,
+     편집 화면에 보이는 `eyJhbGci…`/`https://aBcDe.supabase.co` 같은 문자열은 실제
+     저장된 값이 아니라 **입력 필드가 비어있을 때 뜨는 placeholder**임(단, ANON_KEY와
+     SERVICE_ROLE_KEY의 placeholder는 실제 저장된 값의 앞부분을 반영하는 것으로
+     보였음 — `eyJhbGci`로 시작하는 게 실제로 legacy JWT였다는 게 나중에 증명됨).
+     확실하게 하려면 Supabase 대시보드(Settings → API Keys → "Publishable and
+     secret API keys" 탭, "Legacy" 탭 아님)에서 값을 다시 복사해 Vercel에 덮어쓰는
+     게 안전함.
+   - **중요**: `SUPABASE_SERVICE_ROLE_KEY`는 로그인뿐 아니라
+     `lib/supabase/admin.ts`의 `createAdminClient()`를 통해 **고객용 공개 예약
+     플로우(`/book/[slug]` 링크 조회, 가용성 계산, 예약 생성) 전체**에도 쓰인다.
+     즉 이 버그가 있던 동안은 배포 사이트에서 로그인뿐 아니라 **고객의 실제 예약
+     생성도 실패했을 가능성이 높음**(사용자가 별도로 테스트했다고 확인, 여기선
+     재확인 생략함).
+4. **수정**: Vercel 프로젝트 → Environment Variables에서 `NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` 3개를 `.env.local`의
+   올바른 값으로 덮어쓰고 재배포. 이후 일부러 틀린 비밀번호로 로그인해서 에러가
+   `401 Invalid API Key` → `400 Invalid login credentials`로 바뀐 것을 확인해
+   API 연결 자체는 정상임을 검증. **사용자가 실제 비밀번호로 로그인 성공까지 확인함.**
+   - 편집 중 Vercel의 "Environments" 드롭다운(Production/Preview/Development
+     선택)을 실수로 "Preview"만 남긴 채 저장할 뻔했음 — 값을 다 입력한 후 저장
+     직전에 **Environments가 여전히 "Production and Preview"인지 반드시 재확인**할 것.
+5. **알림설정 + 계정을 "마이페이지"(`/admin/mypage`)로 통합** (사용자 요청, 헤더
+   메뉴가 5개라 좁아 보인다는 피드백도 겸사겸사 해결). 기존 `/admin/notifications`,
+   `/admin/account` 라우트는 삭제, 로직은 `app/admin/(dashboard)/mypage/actions.ts`로
+   병합. 비밀번호 폼은 `useActionState`가 필요해 `components/admin/ChangePasswordForm.tsx`
+   클라이언트 컴포넌트로 분리(페이지 자체는 알림 설정 데이터를 불러와야 해서 서버
+   컴포넌트로 유지).
+6. **주의: 이 프로젝트 폴더가 OneDrive 동기화 폴더 안에 있다.** 세션 중 `Remove-Item
+   -Recurse -Force`로 지운 `app/admin/(dashboard)/account`,
+   `.../notifications` 폴더가 (git에서는 이미 삭제됐는데도) **파일시스템에
+   저절로 다시 나타나는 현상**을 겪음 — OneDrive가 삭제 직후의 로컬 상태를 클라우드
+   버전으로 되돌린 것으로 추정됨. 파일/폴더를 삭제한 직후에는 몇 초 기다렸다가
+   `Get-ChildItem`으로 실제로 없어졌는지 재확인하는 습관이 필요함. `npm run build`가
+   `.next/dev/types/routes.d.ts` 관련 이상한 TS 문법 에러를 내면(존재하지 않는
+   라우트를 참조하는 등) 십중팔구 이런 캐시/동기화 불일치이니 `.next` 폴더를
+   지우고 다시 빌드해볼 것.
+
 ## 다음 단계 제안
 
-1. (우선순위 높음) **가능시간을 아직 하나도 설정 안 했으므로**, 배포/실사용 전에
-   `/admin/schedule`에서 실제 요일별 가능시간을 등록할 것.
-2. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
+1. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
    `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트. (사용자가 API 키 발급이
    어렵다고 해서 이번엔 보류함 — 나중에 다시 시도 가능.)
+2. **Vercel Environment Variables를 다시 확인/수정할 일이 생기면, 반드시 Supabase
+   대시보드의 "Publishable and secret API keys" 탭(레거시 탭 아님)에서 값을 복사할
+   것.** 이번 세션의 근본 원인이 정확히 이 실수였음.
 3. 이 저장소는 이제 **로컬 git + GitHub(`jhj144/anpc-booking`, public) 둘 다에 존재**.
    앞으로 변경사항은 로컬에서 커밋 후 `git push`까지 해야 GitHub에도 반영됨(로컬
    커밋만으로는 GitHub에 안 올라감). **매번 push 전에 `git ls-files`로 시크릿
@@ -236,3 +302,6 @@
 7. 디스코드 웹훅 URL은 `notification_settings` 테이블(DB)에 저장되어 있음 — 코드나
    `.env.local`에는 없음. URL 자체는 이 문서에도 기록하지 않았음(민감정보이므로
    필요하면 Supabase Studio에서 직접 조회할 것).
+8. 이 프로젝트 폴더가 **OneDrive 동기화 폴더 안에 있다는 점**을 항상 염두에 둘 것
+   (7단계 항목 6 참고). 삭제한 파일/폴더가 되살아나거나, 이상한 빌드 캐시 에러가
+   나면 OneDrive 동기화 지연을 의심하고 재확인할 것.
