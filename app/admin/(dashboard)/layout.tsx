@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireAdmin } from "@/lib/supabase/dal";
 import { logout } from "@/app/admin/actions";
 import { AdminNav } from "@/components/admin/AdminNav";
@@ -15,10 +16,10 @@ export default async function AdminDashboardLayout({
       <header className="border-b border-border bg-white">
         <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center justify-between sm:justify-start sm:gap-6">
-            <div className="flex items-center gap-2">
+            <Link href="/admin" className="flex items-center gap-2">
               <Logo size={28} />
               <h1 className="text-base font-semibold text-navy">ANPC 예약 관리</h1>
-            </div>
+            </Link>
             <p className="text-xs text-gray-400">{user.email}</p>
           </div>
           <div className="flex items-center justify-between gap-3">
