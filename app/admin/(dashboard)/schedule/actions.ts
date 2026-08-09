@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/supabase/dal";
 import { createClient } from "@/lib/supabase/server";
+import { eachDateInRange } from "@/lib/dates";
 
 const DAY_COUNT = 7;
 
@@ -47,27 +48,30 @@ export async function deleteAvailableRule(id: string) {
   revalidatePath("/admin/schedule");
 }
 
-export async function addBlockedSlot(formData: FormData) {
+export async function addBlockedRange(formData: FormData) {
   const user = await requireAdmin();
   const supabase = await createClient();
 
-  const blockDate = String(formData.get("block_date") ?? "");
+  const rangeStartDate = String(formData.get("range_start_date") ?? "");
+  const rangeEndDate = String(formData.get("range_end_date") ?? "");
   const isFullDay = formData.get("is_full_day") === "on";
   const startTime = String(formData.get("start_time") ?? "");
   const endTime = String(formData.get("end_time") ?? "");
   const reason = String(formData.get("reason") ?? "").trim() || null;
 
-  if (!blockDate) return;
+  if (!rangeStartDate || !rangeEndDate || rangeStartDate > rangeEndDate) return;
   if (!isFullDay && (!startTime || !endTime || startTime >= endTime)) return;
 
-  await supabase.from("blocked_slots").insert({
+  const rows = eachDateInRange(rangeStartDate, rangeEndDate).map((date) => ({
     admin_id: user.id,
-    block_date: blockDate,
+    block_date: date,
     is_full_day: isFullDay,
     start_time: isFullDay ? null : startTime,
     end_time: isFullDay ? null : endTime,
     reason,
-  });
+  }));
+
+  await supabase.from("blocked_slots").insert(rows);
 
   revalidatePath("/admin/schedule");
 }

@@ -1,8 +1,11 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition, type FormEvent } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { RangeCalendar } from "@/components/ui/RangeCalendar";
+import { useDateRangeCalendar } from "@/lib/useDateRangeCalendar";
+import { formatDateLabel } from "@/lib/dates";
 import type { LinkFormState } from "@/app/admin/(dashboard)/links/actions";
 
 interface TemplateOption {
@@ -40,9 +43,23 @@ export function LinkForm({ action, templates, submitLabel, defaultValues }: Link
     : "30";
   const [durationPreset, setDurationPreset] = useState(initialPreset);
 
+  const { viewYear, viewMonth, startDate, endDate, selectDate, goPrevMonth, goNextMonth } =
+    useDateRangeCalendar(defaultValues?.range_start_date ?? null, defaultValues?.range_end_date ?? null);
+  const [, startTransition] = useTransition();
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    formData.set("range_start_date", startDate ?? "");
+    formData.set("range_end_date", endDate ?? startDate ?? "");
+    startTransition(() => {
+      formAction(formData);
+    });
+  }
+
   return (
     <Card>
-      <form action={formAction} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium text-navy">예약 이름</label>
           <input
@@ -86,27 +103,26 @@ export function LinkForm({ action, templates, submitLabel, defaultValues }: Link
           )}
         </div>
 
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="mb-1 block text-sm font-medium text-navy">시작일</label>
-            <input
-              type="date"
-              name="range_start_date"
-              required
-              defaultValue={defaultValues?.range_start_date}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-navy-300"
+        <div>
+          <label className="mb-1 block text-sm font-medium text-navy">예약 가능 기간</label>
+          <div className="rounded-md border border-border p-3">
+            <RangeCalendar
+              viewYear={viewYear}
+              viewMonth={viewMonth}
+              startDate={startDate}
+              endDate={endDate}
+              onSelectDate={selectDate}
+              onPrevMonth={goPrevMonth}
+              onNextMonth={goNextMonth}
             />
           </div>
-          <div className="flex-1">
-            <label className="mb-1 block text-sm font-medium text-navy">종료일</label>
-            <input
-              type="date"
-              name="range_end_date"
-              required
-              defaultValue={defaultValues?.range_end_date}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-navy-300"
-            />
-          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            {startDate && endDate
+              ? `${formatDateLabel(startDate)} ~ ${formatDateLabel(endDate)}`
+              : startDate
+                ? `${formatDateLabel(startDate)} (하루 · 기간으로 지정하려면 종료일도 선택)`
+                : "날짜를 선택하세요"}
+          </p>
         </div>
 
         <div>
@@ -129,7 +145,7 @@ export function LinkForm({ action, templates, submitLabel, defaultValues }: Link
 
         {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
 
-        <Button type="submit" disabled={pending} className="w-full">
+        <Button type="submit" disabled={pending || !startDate} className="w-full">
           {pending ? "저장 중..." : submitLabel}
         </Button>
       </form>
