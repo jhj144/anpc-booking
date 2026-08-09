@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/admin/schedule", label: "일정 관리" },
   { href: "/admin/templates", label: "메시지 템플릿" },
   { href: "/admin/notifications", label: "알림 설정" },
+  { href: "/admin/account", label: "계정" },
 ];
 
 export function AdminNav() {
