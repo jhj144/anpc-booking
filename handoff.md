@@ -91,10 +91,6 @@
 
 ## 시도했지만 검증하지 못한 것 / 실패한 것
 
-- **클립보드 복사 버튼(안내 메시지 복사, 링크 복사)의 실제 복사 값**은 확인 못 함.
-  자동화 도구로 `navigator.clipboard.readText()`를 호출하니 권한 프롬프트가 뜨면서
-  CDP 호출이 타임아웃됨(45초). 코드는 표준 Clipboard API라 정상 동작할 것으로 판단하지만
-  **사람이 직접 브라우저에서 한 번 눌러서 확인 필요**.
 - **디스코드 웹훅 알림 실제 발송**은 미검증. `notification_settings`에 실제 웹훅 URL을
   넣고 예약을 발생시켜 디스코드 채널에 메시지가 도착하는지 아직 안 봤음.
 - **이메일 알림(Resend)**은 아예 비활성 상태. `.env.local`에 `RESEND_API_KEY`,
@@ -135,21 +131,66 @@
    - `window.confirm()`은 브라우저 자동화(CDP)가 다루지 못하고 멈춰버려서, 최종
      클릭 확인은 사용자가 직접 브라우저에서 수행함(단일 삭제, 일괄 삭제 둘 다 확인 완료).
 
+## 4단계 — 캘린더 UI 통합 + 클립보드 검증 완료 (전부 완료)
+
+사용자가 세션 도중 실시간으로 UI 피드백을 여러 번 줬고, 그때그때 반영함:
+
+1. **일정관리 캘린더가 너무 크고, 불가능시간은 캘린더가 아니라 native `<input type="date">`
+   였음** → 하나로 통합. `components/ui/RangeCalendar.tsx`(순수 UI, 셀 크기 축소로 컴팩트하게)
+   + `lib/useDateRangeCalendar.ts`(범위 선택 상태 훅)로 분리하고, 기존
+   `AvailableRuleForm.tsx`는 삭제, `components/admin/ScheduleCalendarPanel.tsx`로 대체.
+   "가능시간"/"불가능시간" 탭으로 전환하며 캘린더 하나를 공유함. 불가능시간도 이제
+   날짜 범위 지정 가능(`addBlockedRange`가 `eachDateInRange`로 범위 내 날짜마다 행 생성,
+   기존 단일일 전용 `addBlockedSlot`은 제거).
+2. **하루만 등록하고 싶을 때 시작일/종료일을 두 번 눌러야 해서 번거롭다는 피드백** →
+   시작일만 선택해도 등록 가능하도록 변경(종료일 미선택 시 시작일과 동일하게 취급).
+   `ScheduleCalendarPanel`과 `LinkForm` 양쪽 다 적용.
+3. **예약 링크 생성/수정 폼도 시작일/종료일을 캘린더로** → `LinkForm.tsx`도 동일한
+   `RangeCalendar`/훅으로 교체. 이 과정에서 `useActionState`가 반환하는 dispatch 함수를
+   `<form action={...}>`가 아니라 수동으로(`onSubmit` 안에서) 호출할 때는 반드시
+   `startTransition`으로 감싸야 한다는 React 콘솔 경고를 실제로 만남
+   ("An async function with useActionState was called outside of a transition") —
+   안 그러면 `isPending`이 갱신되지 않음. `useTransition`으로 감싸서 수정함.
+4. **예약 링크 목록의 개별 즉시삭제를 체크박스 다중선택 + 일괄삭제로 변경**
+   (사용자 요청). `components/admin/BookingLinksList.tsx`가 선택 상태 관리,
+   `deleteBookingLinks(ids[])` 서버 액션 추가. `BookingLinkCard`는 이제 체크박스 UI만
+   담당(자체 삭제 버튼 없음). 상세 페이지의 단일 삭제(`DeleteLinkButton`)는 그대로 유지.
+5. **클립보드 복사 버튼 실제 값 검증 완료** — 지난 세션엔 권한 프롬프트 때문에 확인 못
+   했었는데, `navigator.clipboard.writeText`를 `javascript_tool`로 몽키패치해서(권한
+   프롬프트 없이) 실제 복사되는 문자열을 캡처하는 방법으로 우회 검증함:
+   - "안내 메시지 복사"(`BookingRow`): 템플릿의 `{날짜}{시간}` 치환 정상 확인.
+     단, 검증 중 `[고객사] 1주차 미팅` 링크에 템플릿이 아예 연결 안 되어 있어서
+     버튼이 비활성 상태였음을 발견 — `edit` 페이지에서 "1주차" 템플릿을 지정해서 고침
+     (이건 버그가 아니라 그냥 그 링크에 템플릿 지정을 안 해뒀던 것).
+   - "링크 복사"(`BookingLinkCard`): `shareUrl` 그대로 정상 복사됨.
+6. **가능시간이 하나도 없어서 고객 예약 페이지가 완전히 막혀 있던 상태를 발견** —
+   버그가 아니라 사용자가 아직 실제 가능시간을 설정 안 한 것이라고 확인함(2026-08-09
+   기준). 배포/실사용 전에 반드시 `/admin/schedule`에서 실제 가능시간을 등록해야 함.
+
+이번 단계에서 테스트용으로 만들었던 모든 임시 데이터(테스트 예약 링크 3개, 가능시간
+규칙 6개, 불가능시간 1개, 테스트 예약 1건)는 전부 정리 완료. 실제 링크 2개
+(`[고객사] 1주차 미팅`, `[더블유에프엠] 사전미팅`)는 그대로 있고, `[고객사] 1주차 미팅`은
+이번에 템플릿을 연결해준 상태로 남아있음. 세션 도중 사용자가 별도로 실제 링크
+(`[리빔] 사전미팅`)를 직접 만든 것으로 보이는데, 이건 내가 건드리지 않음.
+
 ## 다음 단계 제안
 
-1. (우선순위 높음) 디스코드 웹훅 URL을 실제로 발급받아 `/admin/notifications`에서 켜고
-   테스트 예약을 만들어 실제 발송을 확인.
-2. 안내 메시지 복사 버튼을 브라우저에서 직접 눌러 클립보드 값이 템플릿 치환 규칙대로
-   맞는지 확인.
+1. (우선순위 높음) **가능시간을 아직 하나도 설정 안 했으므로**, 배포/실사용 전에
+   `/admin/schedule`에서 실제 요일별 가능시간을 등록할 것.
+2. 디스코드 웹훅 URL을 실제로 발급받아 `/admin/notifications`에서 켜고 테스트 예약을
+   만들어 실제 발송을 확인.
 3. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
    `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트.
 4. PRD 2번 항목의 "Deploy to Vercel 버튼" 배포 자동화는 아직 손대지 않았음.
-5. `available_rules` "가능시간 추가" 폼으로 요일 여러 개를 한 번에 열면 리스트에 요일별로
-   한 줄씩 따로 표시됨(의도적 트레이드오프, PR 참고). 실사용 중 목록이 지저분하다는
-   피드백이 오면 같은 기간+시간대의 규칙들을 화면에서만 묶어서 보여주는 것을 고려.
-6. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서 `npm run dev`
-   실행 전에 기존 프로세스가 떠 있는지 확인할 것(`Get-NetTCPConnection -LocalPort 3000`).
-7. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
+5. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서
+   `npm run dev` 실행 전에 기존 프로세스가 떠 있는지 확인할 것
+   (`Get-NetTCPConnection -LocalPort 3000 -State Listen`). **이번 세션에서 실제로
+   두 개의 dev 서버 프로세스가 동시에 떠서 Turbopack이 낡은 코드로 응답하는 바람에
+   한참 헤맨 적이 있음** — 이상 동작이 보이면 제일 먼저 의심할 것.
+6. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
    타임아웃되며 멈춘다(네이티브 모달이라 CDP Input 이벤트가 못 닿음). 이런 버튼을
    검증해야 할 때는 클릭 전에 사용자에게 미리 알리고, 최종 확인 클릭은 사용자가 직접
    하도록 요청할 것.
+7. `navigator.clipboard.writeText`를 실제로 호출하는 버튼을 검증할 땐, 클릭 전에
+   `javascript_tool`로 `navigator.clipboard.writeText`를 몽키패치해서 인자를 캡처하면
+   권한 프롬프트 없이 값을 확인할 수 있음(`readText` 방식은 권한 프롬프트로 막힘).
