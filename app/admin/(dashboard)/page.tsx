@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/supabase/dal";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
-import { BookingLinkCard } from "@/components/admin/BookingLinkCard";
+import { BookingLinksList } from "@/components/admin/BookingLinksList";
+import { deleteBookingLinks } from "./links/actions";
 
 export default async function AdminHomePage() {
   const user = await requireAdmin();
@@ -30,20 +31,18 @@ export default async function AdminHomePage() {
           아직 생성된 예약 링크가 없습니다. [새 예약 생성]으로 첫 링크를 만들어보세요.
         </p>
       ) : (
-        <div className="space-y-4">
-          {links.map((link) => (
-            <BookingLinkCard
-              key={link.id}
-              id={link.id}
-              name={link.name}
-              status={link.status}
-              durationMinutes={link.duration_minutes}
-              rangeStartDate={link.range_start_date}
-              rangeEndDate={link.range_end_date}
-              shareUrl={`${appUrl}/book/${link.slug}`}
-            />
-          ))}
-        </div>
+        <BookingLinksList
+          links={links.map((link) => ({
+            id: link.id,
+            name: link.name,
+            status: link.status,
+            durationMinutes: link.duration_minutes,
+            rangeStartDate: link.range_start_date,
+            rangeEndDate: link.range_end_date,
+            shareUrl: `${appUrl}/book/${link.slug}`,
+          }))}
+          onBulkDelete={deleteBookingLinks}
+        />
       )}
     </div>
   );

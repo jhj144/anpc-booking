@@ -108,6 +108,27 @@ export async function toggleBookingLinkStatus(id: string, nextStatus: "active" |
   revalidatePath(`/admin/links/${id}`);
 }
 
+export async function deleteBookingLink(id: string) {
+  const user = await requireAdmin();
+  const supabase = await createClient();
+
+  await supabase.from("booking_links").delete().eq("id", id).eq("admin_id", user.id);
+
+  revalidatePath("/admin");
+  redirect("/admin");
+}
+
+export async function deleteBookingLinks(ids: string[]) {
+  if (ids.length === 0) return;
+
+  const user = await requireAdmin();
+  const supabase = await createClient();
+
+  await supabase.from("booking_links").delete().in("id", ids).eq("admin_id", user.id);
+
+  revalidatePath("/admin");
+}
+
 export async function cancelBooking(linkId: string, bookingId: string) {
   const user = await requireAdmin();
   const supabase = await createClient();

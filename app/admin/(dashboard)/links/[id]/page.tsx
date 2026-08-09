@@ -5,8 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { BookingRow } from "@/components/admin/BookingRow";
+import { DeleteLinkButton } from "@/components/admin/DeleteLinkButton";
 import { formatDateLabel } from "@/lib/dates";
-import { toggleBookingLinkStatus } from "../actions";
+import { toggleBookingLinkStatus, deleteBookingLink } from "../actions";
 
 export default async function LinkDetailPage({
   params,
@@ -73,11 +74,14 @@ export default async function LinkDetailPage({
           <p className="truncate text-xs text-gray-600">{appUrl}/book/{link.slug}</p>
         </div>
 
-        <form action={toggleBookingLinkStatus.bind(null, link.id, nextStatus)} className="mt-3">
-          <button type="submit" className="text-xs text-gray-400 hover:text-navy">
-            {link.status === "active" ? "링크 보관하기" : "링크 다시 활성화"}
-          </button>
-        </form>
+        <div className="mt-3 flex items-center gap-4">
+          <form action={toggleBookingLinkStatus.bind(null, link.id, nextStatus)}>
+            <button type="submit" className="text-xs text-gray-400 hover:text-navy">
+              {link.status === "active" ? "링크 보관하기" : "링크 다시 활성화"}
+            </button>
+          </form>
+          <DeleteLinkButton action={deleteBookingLink.bind(null, link.id)} />
+        </div>
       </Card>
 
       <section>

@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/supabase/dal";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { AvailableRuleForm } from "@/components/admin/AvailableRuleForm";
 import { formatDateLabel, normalizeTime } from "@/lib/dates";
 import {
   addAvailableRule,
@@ -37,69 +38,7 @@ export default async function SchedulePage() {
           기본적으로 모든 시간은 예약 불가 상태이며, 아래에서 연 시간만 예약을 받을 수 있습니다.
         </p>
         <Card className="mb-4">
-          <form action={addAvailableRule} className="space-y-3">
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className="mb-1 block text-xs text-gray-500">시작일</label>
-                <input
-                  type="date"
-                  name="range_start_date"
-                  required
-                  className="w-full rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="mb-1 block text-xs text-gray-500">종료일</label>
-                <input
-                  type="date"
-                  name="range_end_date"
-                  required
-                  className="w-full rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-gray-500">요일 (복수 선택)</label>
-              <div className="flex flex-wrap gap-3">
-                {WEEKDAY_LABELS.map((label, day) => (
-                  <label key={day} className="flex items-center gap-1.5 text-sm text-navy">
-                    <input
-                      type="checkbox"
-                      name={`day-${day}`}
-                      className="h-4 w-4 rounded border-border accent-navy"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-end gap-3">
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">시작 시간</label>
-                <input
-                  type="time"
-                  name="start_time"
-                  defaultValue="10:00"
-                  required
-                  className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
-              <span className="pb-2 text-sm text-gray-400">~</span>
-              <div>
-                <label className="mb-1 block text-xs text-gray-500">종료 시간</label>
-                <input
-                  type="time"
-                  name="end_time"
-                  defaultValue="18:00"
-                  required
-                  className="rounded-md border border-border px-2 py-1.5 text-sm outline-none focus:border-navy-300"
-                />
-              </div>
-              <Button type="submit">가능시간 추가</Button>
-            </div>
-          </form>
+          <AvailableRuleForm action={addAvailableRule} />
         </Card>
 
         {!availableRules || availableRules.length === 0 ? (

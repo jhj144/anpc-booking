@@ -13,6 +13,8 @@ interface BookingLinkCardProps {
   rangeStartDate: string;
   rangeEndDate: string;
   shareUrl: string;
+  selected: boolean;
+  onToggleSelect: () => void;
 }
 
 export function BookingLinkCard({
@@ -23,6 +25,8 @@ export function BookingLinkCard({
   rangeStartDate,
   rangeEndDate,
   shareUrl,
+  selected,
+  onToggleSelect,
 }: BookingLinkCardProps) {
   const [copied, setCopied] = useState(false);
 
@@ -34,38 +38,49 @@ export function BookingLinkCard({
 
   return (
     <Card>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-navy">{name}</h3>
-            {status === "archived" && (
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">보관됨</span>
-            )}
-          </div>
-          <p className="mt-1 text-sm text-gray-500">{durationMinutes}분</p>
-          <p className="mt-1 text-xs text-gray-400">
-            {formatDateLabel(rangeStartDate)} ~ {formatDateLabel(rangeEndDate)}
-          </p>
-        </div>
-        <Link href={`/admin/links/${id}`} className="shrink-0 text-sm font-medium text-navy hover:underline">
-          상세보기
-        </Link>
-      </div>
-
-      <div className="mt-4 flex items-center gap-2 rounded-md border border-border bg-navy-50/40 px-3 py-2">
+      <div className="flex items-start gap-3">
         <input
-          readOnly
-          value={shareUrl}
-          className="w-full truncate bg-transparent text-xs text-gray-600 outline-none"
-          onFocus={(e) => e.currentTarget.select()}
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-navy"
+          aria-label={`${name} 선택`}
         />
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="shrink-0 text-xs font-medium text-navy hover:underline"
-        >
-          {copied ? "복사됨" : "링크 복사"}
-        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-navy">{name}</h3>
+                {status === "archived" && (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">보관됨</span>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-gray-500">{durationMinutes}분</p>
+              <p className="mt-1 text-xs text-gray-400">
+                {formatDateLabel(rangeStartDate)} ~ {formatDateLabel(rangeEndDate)}
+              </p>
+            </div>
+            <Link href={`/admin/links/${id}`} className="shrink-0 text-sm font-medium text-navy hover:underline">
+              상세보기
+            </Link>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 rounded-md border border-border bg-navy-50/40 px-3 py-2">
+            <input
+              readOnly
+              value={shareUrl}
+              className="w-full truncate bg-transparent text-xs text-gray-600 outline-none"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="shrink-0 text-xs font-medium text-navy hover:underline"
+            >
+              {copied ? "복사됨" : "링크 복사"}
+            </button>
+          </div>
+        </div>
       </div>
     </Card>
   );
