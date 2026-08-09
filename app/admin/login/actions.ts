@@ -17,7 +17,7 @@ export async function login(_prevState: LoginState, formData: FormData): Promise
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return { error: `이메일 또는 비밀번호가 올바르지 않습니다. (${error.status} ${error.message})` };
+    return { error: "이메일 또는 비밀번호가 올바르지 않습니다." };
   }
 
   redirect("/admin");
