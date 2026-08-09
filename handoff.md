@@ -185,13 +185,42 @@
    실제 설정으로 그대로 저장되어 있음** — 이제부터 이 프로젝트에서 예약이 들어올 때마다
    실제로 디스코드 알림이 감. 이메일 알림은 여전히 미설정 상태(`RESEND_API_KEY` 없음).
 
+## 6단계 — UI 소소한 개선 + GitHub 업로드/Vercel 배포 버튼 (전부 완료)
+
+1. **불가능시간에도 요일 복수선택 추가, "하루 종일" 옵션 제거** (사용자 요청) —
+   가능시간과 동일하게 요일 체크박스로 범위 내 특정 요일만 막을 수 있음.
+   `addBlockedRange`가 `eachDateInRange` 결과를 `dayOfWeek`로 필터링하도록 수정.
+   항상 시작/종료 시간을 받게 되어 "하루 종일" 토글 UI는 삭제(기존 DB의
+   `is_full_day` 컬럼/표시 로직은 하위호환을 위해 그대로 둠 — 과거에 하루종일로
+   등록된 행이 있다면 목록에서 여전히 "하루 종일"로 보임).
+2. **헤더의 로고+"ANPC 예약 관리" 텍스트를 클릭하면 `/admin`(예약 링크 목록)으로
+   이동하도록** `app/admin/(dashboard)/layout.tsx`에 `Link` 추가.
+3. **GitHub 저장소 생성 + 푸시 완료**: https://github.com/jhj144/anpc-booking
+   (public). 사용자가 이미 GitHub에 로그인되어 있던 브라우저 세션에서
+   `github.com/new`로 직접 만들고, 로컬 git에 `git remote add origin` +
+   `git push -u origin main`으로 업로드(커밋 히스토리 전부 포함, 총 10+ 커밋).
+   푸시 전 `git ls-files`로 `.env.local` 등 시크릿 파일이 스테이징/트래킹되지
+   않았음을 재확인함(`.env.example`만 포함, 실제 키 없음).
+4. **README.md 작성 — "Deploy to Vercel" 1-Click 배포 버튼 포함** (PRD 2번 항목).
+   버튼 URL은 `https://vercel.com/new/clone?repository-url=...&env=NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,NEXT_PUBLIC_APP_URL&project-name=anpc-booking&repository-name=anpc-booking`
+   형태로, 클릭하면 Vercel이 "Cloning from GitHub: jhj144/anpc-booking"으로
+   자동 연결되는 것까지 브라우저로 확인함(실제 로그인/배포는 계정 소유자 몫이라
+   거기서 멈춤). README에는 Supabase 프로젝트 생성 → schema.sql/migrations 실행
+   순서 → 관리자 계정 수동 생성 → 배포 후 `NEXT_PUBLIC_APP_URL` 재설정까지
+   전체 셋업 순서를 문서화함. Resend 환경변수는 배포 버튼의 필수 입력에서 제외하고
+   "선택 기능"으로 별도 안내(필수로 걸어두면 계정 없는 사람이 배포 자체를 못 하게 됨).
+
 ## 다음 단계 제안
 
 1. (우선순위 높음) **가능시간을 아직 하나도 설정 안 했으므로**, 배포/실사용 전에
    `/admin/schedule`에서 실제 요일별 가능시간을 등록할 것.
 2. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
-   `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트.
-3. PRD 2번 항목의 "Deploy to Vercel 버튼" 배포 자동화는 아직 손대지 않았음.
+   `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트. (사용자가 API 키 발급이
+   어렵다고 해서 이번엔 보류함 — 나중에 다시 시도 가능.)
+3. 이 저장소는 이제 **로컬 git + GitHub(`jhj144/anpc-booking`, public) 둘 다에 존재**.
+   앞으로 변경사항은 로컬에서 커밋 후 `git push`까지 해야 GitHub에도 반영됨(로컬
+   커밋만으로는 GitHub에 안 올라감). **매번 push 전에 `git ls-files`로 시크릿
+   파일이 없는지 재확인할 것** — 사용자가 이 점을 특별히 강조함.
 4. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서
    `npm run dev` 실행 전에 기존 프로세스가 떠 있는지 확인할 것
    (`Get-NetTCPConnection -LocalPort 3000 -State Listen`). **이번 세션에서 실제로
