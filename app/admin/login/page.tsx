@@ -13,7 +13,9 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4 py-10">
       <Logo size={44} className="mb-4" />
       <h1 className="mb-1 text-lg font-semibold text-navy">ANPC 관리자 로그인</h1>
-      <p className="mb-6 text-sm text-gray-500">배포 시 발급한 관리자 계정으로 로그인하세요.</p>
+      <p className="mb-6 text-sm text-gray-500">
+        Supabase에서 직접 생성한 관리자 계정으로 로그인하세요.
+      </p>
 
       <Card>
         <form action={formAction} className="space-y-4">
