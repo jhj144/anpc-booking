@@ -1,307 +1,198 @@
 # Handoff — ANPC 예약 페이지
 
-이 문서만 읽고 이어서 작업할 수 있도록 지금까지의 작업, 성공/실패, 다음 단계를 정리했다.
-프로젝트 배경/기능 요구사항은 `prd.md` 참고. Next.js 16 관련 주의사항은 `AGENTS.md` 참고
-(미들웨어가 `proxy.ts`로 개명되는 등 실제 breaking change가 있으니 새 API를 쓸 때는
-`node_modules/next/dist/docs`를 먼저 확인할 것).
+**이 문서만 읽고 바로 이어서 작업할 수 있도록 작성했다.** 프로젝트 배경/기능 요구사항은
+`prd.md` 참고. Next.js 16 관련 주의사항은 `AGENTS.md` 참고(미들웨어가 `proxy.ts`로
+개명되는 등 실제 breaking change가 있으니 새 API를 쓸 때는 `node_modules/next/dist/docs`를
+먼저 확인할 것).
 
-## 세션 시작 시점 상태
+## 0. 현재 상태 요약
 
-- DB 스키마(`supabase/schema.sql`)와 고객용 예약 페이지(`/book/[slug]`)는 이미 구현되어 있었음.
-- 관리자 대시보드는 전혀 없었음 (`app/page.tsx`가 "준비 중"이라고만 표시).
+- **배포됨**: https://anpc-booking.vercel.app (Vercel, Production 정상 동작 확인됨)
+- **GitHub**: https://github.com/jhj144/anpc-booking (public). 로컬 git과 동기화되어
+  있음. **로컬에서 커밋만 하고 `git push`를 안 하면 GitHub/Vercel에 반영 안 됨** — 항상
+  마지막에 push까지 할 것.
+- **DB**: Supabase 프로젝트(ANPC_Meets, 리전 ap-northeast-1). 로컬 `.env.local`과
+  Vercel 환경변수 모두 같은 프로젝트를 가리킴.
+- **관리자 계정**: `jhj@alphabrothers.co.kr` (Supabase Auth에 수동 생성된 유일한 관리자).
+  회원가입 기능 없음 — 이 계정만 로그인 가능.
+- **실사용 데이터**: 실제 예약 링크 3개(`[리빔] 사전미팅`, `[고객사] 1주차 미팅`,
+  `[더블유에프엠] 사전미팅`), 사용자가 직접 등록한 실제 가능시간 존재, 디스코드 웹훅
+  알림 활성화되어 실제로 동작 중. **테스트용으로 만들었던 임시 데이터는 전부 정리 완료.**
+- **미완성**: 이메일(Resend) 알림만 미설정 상태(아래 3번 참고).
 
-## 1단계에서 한 일 — 관리자 대시보드 전체 구축 (성공)
+## 1. 시도한 것 (이번 세션 작업 전체, 시간순 요약)
 
-아래를 전부 새로 만들었고, 실제 사용자의 Supabase 프로젝트(운영 중인 진짜 DB)에서
-브라우저로 전체 플로우를 검증 완료함(로그인 → 일정 설정 → 예약 링크 생성 → 고객 예약 →
-관리자 확인 → 취소 → 슬롯 재오픈).
+### 1-1. 관리자 대시보드 신규 구축
+기존엔 DB 스키마와 고객용 예약 페이지(`/book/[slug]`)만 있고 관리자 대시보드가 전혀
+없었음. 아래를 전부 새로 만듦:
+- 인증: `proxy.ts`(미들웨어, 세션 쿠키 갱신 + `/admin/*` 보호), `lib/supabase/dal.ts`의
+  `requireAdmin()`, `app/admin/login/`.
+- 관리자 레이아웃/대시보드: `app/admin/(dashboard)/layout.tsx`, 예약 링크 카드 목록.
+- 일정관리, 메시지 템플릿 CRUD, 예약 링크 생성/수정, 예약 상세/안내 메시지 복사,
+  디스코드/이메일 알림 설정.
 
-- **인증**: `proxy.ts`(Next 16에서 middleware의 새 이름, 세션 쿠키 갱신 + `/admin/*` 보호),
-  `lib/supabase/dal.ts`의 `requireAdmin()`(DAL 패턴, React `cache`로 메모），
-  `app/admin/login/`(로그인 폼+서버 액션), `app/admin/actions.ts`(로그아웃).
-  관리자 계정은 자체 가입 기능 없이 Supabase Studio에서 수동 생성하는 구조(PRD 의도대로).
-- **관리자 레이아웃/대시보드**: `app/admin/(dashboard)/layout.tsx`(라우트 그룹, 로그인 페이지는
-  이 그룹 밖에 있어 인증 체크에서 제외됨), 예약 링크 카드 목록(`page.tsx` + `BookingLinkCard`).
-- **일정관리**: 처음엔 "요일별 고정시간표 + 수동 차단" 구조였으나 2단계에서 전면 재설계됨(아래 참고).
-- **메시지 템플릿**: CRUD, 처음엔 시스템 기본 템플릿 2개 + 관리자 커스텀이었으나 2단계에서
-  기본 템플릿 개념 자체를 제거함(아래 참고).
-- **예약 링크 생성/수정**: `LinkForm`, `links/actions.ts`. 처음엔 미팅방법 필드가 있었으나
-  2단계에서 제거됨.
-- **예약 상세/안내 메시지 복사**: `links/[id]/page.tsx`, `BookingRow`(템플릿의 `{날짜}{시간}`
-  치환 후 클립보드 복사), 예약 취소 기능.
-- **알림**: `app/admin/(dashboard)/notifications/`(Discord 웹훅 URL + 알림 이메일 On/Off 설정),
-  `lib/notifications.ts`가 `app/book/[slug]/actions.ts`의 `createBooking` 성공 후 호출됨.
-  알림 발송 실패는 예약 성공 여부에 영향 없음(`Promise.allSettled` + 내부 try/catch).
+### 1-2. 사용자 요청 보완사항 (로고 적용, 미팅방법 필드 제거, 예약시간 옵션박스화,
+일정관리 전면 재설계, 기본 템플릿 제거 등) — 상세는 git 커밋 로그(`git log --oneline`)
+참고. 이 중 가장 큰 변경은 **일정관리 재설계**: "요일별 무한반복 가능시간 + 예외 차단"
+방식을 "기본 전부 닫힘 + 관리자가 명시적으로 연 시간만 예약 가능" 방식으로 전환
+(`weekly_schedule` 테이블 삭제, `available_rules` 테이블 신설). 관련 마이그레이션
+3개(`supabase/migrations/001~003_*.sql`)는 **전부 사용자가 Supabase Studio SQL
+Editor에서 직접 실행 완료**함(서비스 롤 키로는 DDL 실행 불가 — PostgREST 한계).
 
-## 2단계 — 사용자 요청 7가지 보완사항 (전부 완료, 실제 DB 검증 완료)
+### 1-3. UI/UX 개선 (사용자가 세션 중 실시간 피드백을 주는 대로 반영)
+- 일정관리 캘린더를 `<input type="date">` 팝업 방식 → 항상 펼쳐진 인라인 범위 캘린더로
+  교체 (`components/ui/RangeCalendar.tsx` + `lib/useDateRangeCalendar.ts`).
+- "가능시간"/"불가능시간"을 탭으로 통합해 캘린더 하나 공유
+  (`components/admin/ScheduleCalendarPanel.tsx`).
+- 불가능시간도 날짜 범위 + 요일 복수선택 가능하게, "하루 종일" 옵션은 제거.
+- 날짜를 하루만 선택해도 등록 가능(시작일=종료일로 자동 처리), 예약 링크 생성/수정
+  폼도 같은 캘린더로 통일.
+- 예약 링크 목록: 개별 즉시삭제 → 체크박스 다중선택 + 일괄삭제로 변경
+  (`components/admin/BookingLinksList.tsx`). 상세 페이지엔 단일 삭제 버튼 유지.
+- 예약 링크 목록에 "예약 전"/"예약 완료" 상태 배지 추가(초록/회색).
+- 헤더 로고+타이틀 클릭 시 `/admin`(예약 링크 목록)으로 이동.
+- 고객용 예약 페이지(`/book/[slug]`) 상단에도 로고 옆 "ANPC 예약 관리" 텍스트 추가.
+- **알림설정 + 계정(비밀번호 변경)을 "마이페이지"(`/admin/mypage`) 하나로 통합**
+  (기존 `/admin/notifications`, `/admin/account`는 삭제됨).
+- **예약 가능 슬롯 간격을 미팅 진행시간(duration) 기준에서 항상 1시간 고정 간격으로
+  변경** (`lib/slots.ts`의 `SLOT_INTERVAL_MINUTES = 60`). 예: 12~18시 가능시간 +
+  2시간 미팅 → 기존엔 12/14/16만 선택 가능했는데, 이제 12/13/14/15/16까지 선택
+  가능(17시는 종료가 19시라 범위 밖이라 제외). 이 변경은 **모든 링크에 동일 적용**
+  하기로 사용자와 확정함(45분짜리 미팅 링크도 이제 45분 간격이 아니라 1시간 간격).
 
-방식: 각 항목마다 `AskUserQuestion`으로 심층 인터뷰 후 구현. 아래 순서대로 처리함.
+### 1-4. 배포 인프라 구축
+- 로컬 git 저장소 초기화 + 첫 커밋(원래 git 저장소가 아니었음).
+- GitHub 저장소(`jhj144/anpc-booking`, public) 생성 후 push.
+- `README.md`에 "Deploy to Vercel" 1-Click 배포 버튼 작성(PRD의 "팀원이 각자 배포"
+  요구사항). Supabase 프로젝트 생성 → schema.sql/migrations 실행 → 관리자 계정 생성
+  → 배포 → `NEXT_PUBLIC_APP_URL` 재설정까지 전체 셋업 가이드 문서화.
+- 사용자가 실제로 배포 버튼을 눌러 Vercel 배포 완료.
 
-1. **로고 적용** — 원래 요청은 "로그인 페이지 좌측 하단 아이콘을 로고로"였는데, 그건 사실
-   Next.js 개발 표시기(Dev Tools indicator)라 로고로 바꿀 수 없는 요소였음(개발 모드 전용,
-   `next.config.mjs`의 `devIndicators`로 위치 변경/숨김만 가능). 인터뷰 결과 실제 의도는
-   "고객용 페이지에 브랜드 로고를 노출하고 싶다"였음. `public/logo.png`(사용자가 직접
-   `public/` 폴더에 넣어준 정사각형 네이비 배경 ANPC 워드마크)를 `components/ui/Logo.tsx`로
-   만들어 로그인 페이지, 관리자 대시보드 헤더, 고객 예약 페이지 상단에 배치(원본 비율 유지,
-   `rounded-lg`로 라운드 처리).
-2. **미팅방법 필드 완전 제거** — `booking_links.meeting_method`/`meeting_method_detail`
-   컬럼까지 DB에서 삭제(사용자가 명시적으로 요청, `supabase/migrations/001_drop_meeting_method.sql`
-   작성 → **사용자가 Supabase Studio에서 직접 실행 완료**). `lib/meetingMethods.ts` 삭제,
-   관련 코드(폼, 쿼리 select 목록, 알림 메시지, 템플릿의 `{미팅방법}` 플레이스홀더, 예약
-   요약/확정 화면) 전체 정리. 관련 파일이 15개 가까이 됐음 — grep으로
-   `meeting_method|meetingMethod|MEETING_METHODS` 검색해서 소스에 남은 게 없는지 확인함.
-3. **예약 진행 시간 옵션박스화** — `LinkForm.tsx`에서 30분/1시간/2시간/직접입력 select로 변경.
-   **버그를 하나 만들었다가 그 자리에서 고침**: "직접입력"으로 전환할 때 React가 이전
-   `<input type="hidden">`과 새 `<input type="number">`를 같은 자리의 같은 태그로 보고
-   DOM 노드를 재사용해버려서(리컨실리에이션), 새 입력창에 이전 프리셋 값(예: "30")이 그대로
-   남아있던 문제. `key="custom"` / `key="preset"`을 각각 붙여서 해결. **이런 종류의 조건부
-   입력 스위칭 패턴을 또 만들 때는 처음부터 key를 붙일 것.**
-4. **템플릿 선택 필수 → 선택 사항** — 이미 그렇게 구현되어 있었음(코드 재확인만 하고 넘어감).
-5+6. **일정관리 전면 재설계** (가장 큰 변경) — 기존 "요일별 무한 반복 가능시간 + 예외적으로
-   차단" 방식(화이트리스트인데 사실상 항상 열려있는 모델)을, "기본은 전부 닫혀있고 관리자가
-   명시적으로 연 시간만 예약 가능" 방식으로 전환. 인터뷰에서 PRD의 핵심 기능(공휴일/연차
-   차단)을 잃지 않도록 확인하며 진행함:
-   - `weekly_schedule` 테이블 삭제, `available_rules` 테이블 신설
-     (`admin_id, day_of_week, start_time, end_time, range_start_date, range_end_date`).
-     "가능시간 추가" 폼에서 기간+요일(복수선택)+시간대를 입력하면 요일 개수만큼 행이
-     insert됨(예: 월~금 체크 시 5행).
-   - `blocked_slots` 테이블/로직은 그대로 두고 UI 라벨만 "불가능시간 설정"으로 변경
-     (이미 열어둔 시간 중 특정 날짜/시간을 다시 막는 용도로 재해석).
-   - `lib/slots.ts`의 `getAvailableSlots`가 날짜별로 `available_rules`를 필터링하도록 재작성
-     (기존엔 요일별로 그룹핑 후 전체 기간에 무조건 적용했음).
-   - `supabase/migrations/002_available_rules.sql` 작성 — 기존 `weekly_schedule` 데이터를
-     "오늘부터 180일" 유효기간의 규칙으로 자동 이전한 후 테이블 drop. **사용자가 실행 완료**.
-   - 브라우저로 실제 검증: 새 규칙(토요일 09:00~12:00, 8/20~8/31) 추가 → 예약 링크 기간 확장
-     → 고객 페이지에서 해당 토요일에 45분 간격 슬롯(09:00/09:45/10:30/11:15)이 정확히 계산됨.
-7. **기본 제공 템플릿 제거** — `message_templates.admin_id`를 `not null`로 변경,
-   `is_default` 컬럼 삭제, RLS 정책을 "본인 소유만" 단일 정책으로 교체.
-   `supabase/migrations/003_remove_default_templates.sql`. **사용자가 실행 완료**.
-   템플릿 페이지에서 "기본 제공 템플릿" 섹션 제거, 링크 생성/수정 폼의 템플릿 select 쿼리도
-   `admin_id.is.null` OR 조건 제거하고 단순히 `eq("admin_id", user.id)`로 변경.
+### 1-5. 배포 후 로그인 불가 사태 디버깅 (아래 2, 3번 참고)
 
-세 마이그레이션 모두 **사용자가 Supabase Studio SQL Editor에서 직접 실행 완료**했다고 확인함
-(내가 가진 서비스 롤 키로는 DDL을 실행할 수 없어서 — REST/PostgREST는 스키마 변경을 지원 안 함).
+## 2. 성공한 것 / 검증 완료된 것
 
-## 성공적으로 검증된 것
-
-- `npm run build`, `npm run lint` 모두 통과 (최종 상태 기준).
+- `npm run build`, `npm run lint` 항상 통과 상태 유지.
 - claude-in-chrome으로 실제 브라우저 + 사용자의 실제 Supabase 프로젝트를 대상으로
-  전체 플로우를 여러 번 재검증함 (로그인, 가능시간/불가능시간 CRUD, 템플릿 CRUD, 예약
-  링크 생성/수정, 고객 예약, 예약 취소 후 슬롯 재오픈, 로고 노출).
+  전체 플로우 반복 검증: 로그인, 가능시간/불가능시간 CRUD, 템플릿 CRUD, 예약 링크
+  생성/수정/삭제(단일+일괄), 고객 예약, 예약 취소 후 슬롯 재오픈, 로고 노출.
+- **클립보드 복사 버튼 실제 값 검증 완료** — "안내 메시지 복사"(템플릿 `{날짜}{시간}`
+  치환 정상), "링크 복사"(`shareUrl` 정상). 검증 기법: `navigator.clipboard.writeText`를
+  `javascript_tool`로 몽키패치해서 실제 인자를 캡처(권한 프롬프트 우회).
+- **디스코드 웹훅 알림 실제 발송 검증 완료** — 사용자가 실제 웹훅 URL 발급, 설정 저장 →
+  테스트 예약 생성 → 디스코드 채널에서 알림 수신 확인함. 현재 실제 설정으로 활성화되어
+  있어 앞으로 예약이 생길 때마다 알림이 감.
+- **GitHub/Vercel 배포 파이프라인 검증 완료** — 배포 버튼이 정확한 저장소로 연결됨을
+  확인, 실제 배포 성공, git push 시 Vercel 자동 재배포 확인.
+- **배포 사이트 로그인 성공 확인** (아래 3번 문제 해결 후, 사용자가 직접 확인).
+- **예약 슬롯 1시간 간격 변경 로컬에서 검증 완료** (12~18시+2시간 미팅 → 10~16시
+  링크로 실측, 정확히 1시간 간격씩 생성됨을 스크린샷으로 확인). 배포本은 push 직후라
+  사용자가 아직 재확인 전.
 
-## 시도했지만 검증하지 못한 것 / 실패한 것
+## 3. 실패했거나 시행착오를 거친 것 (중요 — 반드시 읽을 것)
 
-- **이메일 알림(Resend)**은 아예 비활성 상태. `.env.local`에 `RESEND_API_KEY`,
-  `RESEND_FROM_EMAIL`이 비어있어서 `lib/notifications.ts`의 `sendEmailNotification`이
-  조건문(`if (params.emailEnabled && ... && process.env.RESEND_API_KEY)`)에서 걸러져
-  아예 호출조차 안 됨. Resend 계정 발급 후 값 채워야 테스트 가능.
-- 자동 테스트(unit/e2e)가 프로젝트에 전혀 없음. `lib/slots.ts`의 가용성 계산 로직은
-  브라우저 수동 확인만 거쳤고 회귀 테스트가 없어서, 다음에 이 파일을 건드릴 때 다시
-  수동으로 캘린더를 확인해봐야 함.
-- 이 저장소는 **git 저장소가 아님** (`git status` → "not a git repository"). 지금까지의
-  모든 변경이 커밋되지 않은 로컬 파일 상태로만 존재함. 배포 전에 `git init` + 커밋 필요.
-
-## 3단계에서 한 일 (전부 완료, 실제 DB/브라우저 검증 완료)
-
-1. **git 저장소 초기화 + 첫 커밋** — 이전에는 git 저장소가 아니었음. `.env.local`이
-   `.gitignore`에 걸려 있어 시크릿은 커밋되지 않음을 `git ls-files`로 재확인 후 진행.
-2. **일정관리 "가능시간 추가" 날짜 입력을 인라인 범위 캘린더로 교체** —
-   `components/admin/AvailableRuleForm.tsx` 신설. 기존엔 `<input type="date">`를
-   눌러야(그것도 달력 아이콘만) 팝업이 떴는데, 이제 폼 안에 항상 펼쳐진 캘린더가 있고
-   두 번 클릭(시작일→종료일)으로 범위를 선택함. 요일 체크박스도 컨트롤드 상태로 전환.
-   **버그를 하나 만들었다가 그 자리에서 고침**: Next.js는 `<form action={serverAction}>`
-   제출이 끝나면 폼을 네이티브로 자동 리셋하는데, 이게 컨트롤드 체크박스(React state)와
-   충돌해서 제출 후 체크박스가 시각적으로만 해제되고 내부 state는 그대로 남는 문제가
-   있었음(다시 제출하면 실제로는 빈 값이 나갈 위험). `<form onSubmit={...}>` +
-   `e.preventDefault()` + 수동으로 `FormData`를 구성해 `startTransition`으로 서버
-   액션을 직접 호출하는 방식으로 바꿔서 해결. **앞으로 서버 액션을 쓰는 폼에 컨트롤드
-   input을 섞을 때는 이 자동 리셋 문제를 염두에 둘 것.**
-3. **예약 링크 삭제 기능 추가**:
-   - `deleteBookingLink(id)`/`deleteBookingLinks(ids[])` 서버 액션
-     (`links/actions.ts`). `bookings.booking_link_id`가 `on delete cascade`라서
-     링크를 지우면 연결된 예약 내역도 함께 삭제됨 — 그래서 `window.confirm()`으로
-     경고 문구를 띄운 후 진행하도록 함.
-   - 상세 페이지(`links/[id]/page.tsx`)에는 `DeleteLinkButton`으로 단일 삭제.
-   - 목록 페이지(`app/admin/(dashboard)/page.tsx`)는 사용자 요청으로 처음엔 카드마다
-     즉시삭제 버튼이었다가, **체크박스로 여러 개 선택 후 한 번에 "선택 삭제"하는 방식으로
-     변경**. `components/admin/BookingLinksList.tsx`가 선택 상태를 관리하고
-     `BookingLinkCard`는 체크박스 UI만 담당(자체 삭제 버튼 없음).
-   - `window.confirm()`은 브라우저 자동화(CDP)가 다루지 못하고 멈춰버려서, 최종
-     클릭 확인은 사용자가 직접 브라우저에서 수행함(단일 삭제, 일괄 삭제 둘 다 확인 완료).
-
-## 4단계 — 캘린더 UI 통합 + 클립보드 검증 완료 (전부 완료)
-
-사용자가 세션 도중 실시간으로 UI 피드백을 여러 번 줬고, 그때그때 반영함:
-
-1. **일정관리 캘린더가 너무 크고, 불가능시간은 캘린더가 아니라 native `<input type="date">`
-   였음** → 하나로 통합. `components/ui/RangeCalendar.tsx`(순수 UI, 셀 크기 축소로 컴팩트하게)
-   + `lib/useDateRangeCalendar.ts`(범위 선택 상태 훅)로 분리하고, 기존
-   `AvailableRuleForm.tsx`는 삭제, `components/admin/ScheduleCalendarPanel.tsx`로 대체.
-   "가능시간"/"불가능시간" 탭으로 전환하며 캘린더 하나를 공유함. 불가능시간도 이제
-   날짜 범위 지정 가능(`addBlockedRange`가 `eachDateInRange`로 범위 내 날짜마다 행 생성,
-   기존 단일일 전용 `addBlockedSlot`은 제거).
-2. **하루만 등록하고 싶을 때 시작일/종료일을 두 번 눌러야 해서 번거롭다는 피드백** →
-   시작일만 선택해도 등록 가능하도록 변경(종료일 미선택 시 시작일과 동일하게 취급).
-   `ScheduleCalendarPanel`과 `LinkForm` 양쪽 다 적용.
-3. **예약 링크 생성/수정 폼도 시작일/종료일을 캘린더로** → `LinkForm.tsx`도 동일한
-   `RangeCalendar`/훅으로 교체. 이 과정에서 `useActionState`가 반환하는 dispatch 함수를
-   `<form action={...}>`가 아니라 수동으로(`onSubmit` 안에서) 호출할 때는 반드시
-   `startTransition`으로 감싸야 한다는 React 콘솔 경고를 실제로 만남
-   ("An async function with useActionState was called outside of a transition") —
-   안 그러면 `isPending`이 갱신되지 않음. `useTransition`으로 감싸서 수정함.
-4. **예약 링크 목록의 개별 즉시삭제를 체크박스 다중선택 + 일괄삭제로 변경**
-   (사용자 요청). `components/admin/BookingLinksList.tsx`가 선택 상태 관리,
-   `deleteBookingLinks(ids[])` 서버 액션 추가. `BookingLinkCard`는 이제 체크박스 UI만
-   담당(자체 삭제 버튼 없음). 상세 페이지의 단일 삭제(`DeleteLinkButton`)는 그대로 유지.
-5. **클립보드 복사 버튼 실제 값 검증 완료** — 지난 세션엔 권한 프롬프트 때문에 확인 못
-   했었는데, `navigator.clipboard.writeText`를 `javascript_tool`로 몽키패치해서(권한
-   프롬프트 없이) 실제 복사되는 문자열을 캡처하는 방법으로 우회 검증함:
-   - "안내 메시지 복사"(`BookingRow`): 템플릿의 `{날짜}{시간}` 치환 정상 확인.
-     단, 검증 중 `[고객사] 1주차 미팅` 링크에 템플릿이 아예 연결 안 되어 있어서
-     버튼이 비활성 상태였음을 발견 — `edit` 페이지에서 "1주차" 템플릿을 지정해서 고침
-     (이건 버그가 아니라 그냥 그 링크에 템플릿 지정을 안 해뒀던 것).
-   - "링크 복사"(`BookingLinkCard`): `shareUrl` 그대로 정상 복사됨.
-6. **가능시간이 하나도 없어서 고객 예약 페이지가 완전히 막혀 있던 상태를 발견** —
-   버그가 아니라 사용자가 아직 실제 가능시간을 설정 안 한 것이라고 확인함(2026-08-09
-   기준). 배포/실사용 전에 반드시 `/admin/schedule`에서 실제 가능시간을 등록해야 함.
-
-이번 단계에서 테스트용으로 만들었던 모든 임시 데이터(테스트 예약 링크 3개, 가능시간
-규칙 6개, 불가능시간 1개, 테스트 예약 1건)는 전부 정리 완료. 실제 링크 2개
-(`[고객사] 1주차 미팅`, `[더블유에프엠] 사전미팅`)는 그대로 있고, `[고객사] 1주차 미팅`은
-이번에 템플릿을 연결해준 상태로 남아있음. 세션 도중 사용자가 별도로 실제 링크
-(`[리빔] 사전미팅`)를 직접 만든 것으로 보이는데, 이건 내가 건드리지 않음.
-
-## 5단계 — 예약 현황 배지 + 디스코드 웹훅 실발송 검증 (전부 완료)
-
-1. **예약 링크 목록에 "예약 전"/"예약 완료" 배지 추가** (사용자 요청) — 체크박스 옆에
-   표시. `app/admin/(dashboard)/page.tsx`에서 `bookings`를 `status=confirmed` 조건으로
-   한 번 더 조회해 `booking_link_id` Set을 만들고, `BookingLinkCard`에 `hasBooking`으로
-   내려서 초록/회색 배지로 렌더링. 실제 데이터(`[리빔] 사전미팅`이 이미 예약 있음)로
-   검증 완료.
-2. **디스코드 웹훅 알림 실제 발송 검증 완료** — 사용자가 실제 디스코드 웹훅 URL을
-   발급받아 전달, `/admin/notifications`에서 켜고 저장 → 임시 가능시간 하루 열고
-   고객 예약 페이지에서 실제 예약 생성 → **사용자가 디스코드 채널에서 알림 수신 확인**.
-   테스트에 썼던 임시 가능시간과 예약은 정리했고, **디스코드 웹훅 설정(URL, 활성화)은
-   실제 설정으로 그대로 저장되어 있음** — 이제부터 이 프로젝트에서 예약이 들어올 때마다
-   실제로 디스코드 알림이 감. 이메일 알림은 여전히 미설정 상태(`RESEND_API_KEY` 없음).
-
-## 6단계 — UI 소소한 개선 + GitHub 업로드/Vercel 배포 버튼 (전부 완료)
-
-1. **불가능시간에도 요일 복수선택 추가, "하루 종일" 옵션 제거** (사용자 요청) —
-   가능시간과 동일하게 요일 체크박스로 범위 내 특정 요일만 막을 수 있음.
-   `addBlockedRange`가 `eachDateInRange` 결과를 `dayOfWeek`로 필터링하도록 수정.
-   항상 시작/종료 시간을 받게 되어 "하루 종일" 토글 UI는 삭제(기존 DB의
-   `is_full_day` 컬럼/표시 로직은 하위호환을 위해 그대로 둠 — 과거에 하루종일로
-   등록된 행이 있다면 목록에서 여전히 "하루 종일"로 보임).
-2. **헤더의 로고+"ANPC 예약 관리" 텍스트를 클릭하면 `/admin`(예약 링크 목록)으로
-   이동하도록** `app/admin/(dashboard)/layout.tsx`에 `Link` 추가.
-3. **GitHub 저장소 생성 + 푸시 완료**: https://github.com/jhj144/anpc-booking
-   (public). 사용자가 이미 GitHub에 로그인되어 있던 브라우저 세션에서
-   `github.com/new`로 직접 만들고, 로컬 git에 `git remote add origin` +
-   `git push -u origin main`으로 업로드(커밋 히스토리 전부 포함, 총 10+ 커밋).
-   푸시 전 `git ls-files`로 `.env.local` 등 시크릿 파일이 스테이징/트래킹되지
-   않았음을 재확인함(`.env.example`만 포함, 실제 키 없음).
-4. **README.md 작성 — "Deploy to Vercel" 1-Click 배포 버튼 포함** (PRD 2번 항목).
-   버튼 URL은 `https://vercel.com/new/clone?repository-url=...&env=NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,NEXT_PUBLIC_APP_URL&project-name=anpc-booking&repository-name=anpc-booking`
-   형태로, 클릭하면 Vercel이 "Cloning from GitHub: jhj144/anpc-booking"으로
-   자동 연결되는 것까지 브라우저로 확인함(실제 로그인/배포는 계정 소유자 몫이라
-   거기서 멈춤). README에는 Supabase 프로젝트 생성 → schema.sql/migrations 실행
-   순서 → 관리자 계정 수동 생성 → 배포 후 `NEXT_PUBLIC_APP_URL` 재설정까지
-   전체 셋업 순서를 문서화함. Resend 환경변수는 배포 버튼의 필수 입력에서 제외하고
-   "선택 기능"으로 별도 안내(필수로 걸어두면 계정 없는 사람이 배포 자체를 못 하게 됨).
-
-## 7단계 — 배포 후 로그인 불가 사태 해결 (전부 완료, 가장 중요한 세션)
-
-사용자가 실제로 Vercel 배포 버튼을 눌러 배포를 완료한 뒤 로그인이 계속 안 된다고 해서
-디버깅함. 최종적으로 비밀번호 문제가 아니라 **배포 시 입력한 Supabase 키가 잘못된
-포맷**이었던 것으로 확인됨:
-
-1. **증상**: 배포된 사이트(`anpc-booking.vercel.app`)에서 로그인 시도 시 계속
-   "이메일 또는 비밀번호가 올바르지 않습니다"만 뜸. 사용자는 비밀번호를 잊어버린 줄
-   알고 Supabase Studio(Authentication → Users → 해당 유저 → Send password recovery)로
-   재설정 이메일을 보냈으나, **이 앱에는 recovery 콜백/새 비밀번호 설정 화면이 없어서
-   링크를 클릭하면 그냥 세션만 생기고 로그인되어버리는 문제**를 발견함. 그래서
-   `/admin/mypage`(구 `/admin/account`)에 비밀번호 변경 기능을 급히 추가해서 새
-   비밀번호를 설정하게 함.
-2. **비밀번호 변경 자체도 한 번에 안 됨**: 처음엔 "New password should be different
-   from the old password" 에러가 남 → 이걸 보고 사용자가 "원래 비밀번호가 맞았구나"를
-   깨달음. 다른 비밀번호로 바꾸지 않고 원래 비밀번호로 로그인 시도 → **여전히 실패,
-   이번엔 에러 메시지에 `(401 Invalid API Key)`가 찍힘.** (로그인 액션에 임시로
-   `error.status`/`error.message`를 노출시켜서 알아냄 — 평소엔 절대 이렇게 노출하면
-   안 되고, 원인 파악 후 바로 되돌림.)
-3. **근본 원인**: Vercel 환경변수 `NEXT_PUBLIC_SUPABASE_ANON_KEY`와
+### 3-1. [가장 중요] 배포 사이트 로그인 완전 불가 사태 — 근본 원인: Vercel 환경변수 오류
+사용자가 배포 완료 후 로그인이 안 된다고 보고. 디버깅 과정:
+1. 처음엔 "이메일 또는 비밀번호가 올바르지 않습니다"만 뜸 → 사용자가 비밀번호를
+   잊었다고 판단, Supabase Studio에서 비밀번호 재설정(recovery) 이메일 발송.
+2. **재설정 링크를 클릭하면 새 비밀번호 설정 화면 없이 그냥 로그인되어버리는 문제
+   발견** — 이 앱에 recovery 콜백 페이지가 없었기 때문. 급하게 비밀번호 변경 기능을
+   추가함(`/admin/mypage`의 `ChangePasswordForm` + `changePassword` 서버 액션,
+   `supabase.auth.updateUser({ password })` 사용).
+3. 비밀번호를 바꾸려 하니 "New password should be different from the old
+   password" 에러 → **원래 비밀번호가 맞았다는 뜻**이었음. 원래 비밀번호로 로그인
+   재시도 → 여전히 실패, 에러 메시지에 `(401 Invalid API Key)`가 찍힘(로그인 액션에
+   `error.status`/`error.message`를 임시로 노출시켜서 확인 — 원인 파악 후 즉시 되돌림).
+4. **근본 원인**: Vercel 환경변수 `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `SUPABASE_SERVICE_ROLE_KEY`에 **구버전 JWT 형식 키(`eyJhbGci...`로 시작)**가
    들어가 있었음. 이 Supabase 프로젝트는 신버전 키(`sb_publishable_...`,
-   `sb_secret_...`)를 쓰는 프로젝트라 구버전 키가 무효화되어 있어서 모든 Supabase
-   API 호출이 401로 실패했던 것. `.env.local`에는 처음부터 올바른 신버전 키가 있었으므로
-   **로컬 개발 환경은 한 번도 이 문제를 겪지 않았고, 오직 Vercel 배포본만 영향받음**
-   (아마 최초 배포 버튼 클릭 시 Supabase 대시보드의 "Legacy anon, service_role API
-   keys" 탭 값을 잘못 복사해 넣었을 가능성이 높음).
-   - Vercel Environment Variables UI에서 "Sensitive" 값은 절대 다시 읽을 수 없고,
-     편집 화면에 보이는 `eyJhbGci…`/`https://aBcDe.supabase.co` 같은 문자열은 실제
-     저장된 값이 아니라 **입력 필드가 비어있을 때 뜨는 placeholder**임(단, ANON_KEY와
-     SERVICE_ROLE_KEY의 placeholder는 실제 저장된 값의 앞부분을 반영하는 것으로
-     보였음 — `eyJhbGci`로 시작하는 게 실제로 legacy JWT였다는 게 나중에 증명됨).
-     확실하게 하려면 Supabase 대시보드(Settings → API Keys → "Publishable and
-     secret API keys" 탭, "Legacy" 탭 아님)에서 값을 다시 복사해 Vercel에 덮어쓰는
-     게 안전함.
+   `sb_secret_...`)를 쓰는데 구버전 키가 무효화되어 있어 모든 Supabase API 호출이
+   401로 실패하고 있었음. `.env.local`은 처음부터 신버전 키라 **로컬은 한 번도 이
+   문제를 겪지 않았음** — 아마 최초 배포 버튼으로 배포할 때 Supabase 대시보드의
+   "Legacy anon, service_role API keys" 탭 값을 잘못 복사해 넣은 것으로 추정.
    - **중요**: `SUPABASE_SERVICE_ROLE_KEY`는 로그인뿐 아니라
      `lib/supabase/admin.ts`의 `createAdminClient()`를 통해 **고객용 공개 예약
-     플로우(`/book/[slug]` 링크 조회, 가용성 계산, 예약 생성) 전체**에도 쓰인다.
-     즉 이 버그가 있던 동안은 배포 사이트에서 로그인뿐 아니라 **고객의 실제 예약
-     생성도 실패했을 가능성이 높음**(사용자가 별도로 테스트했다고 확인, 여기선
-     재확인 생략함).
-4. **수정**: Vercel 프로젝트 → Environment Variables에서 `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` 3개를 `.env.local`의
-   올바른 값으로 덮어쓰고 재배포. 이후 일부러 틀린 비밀번호로 로그인해서 에러가
-   `401 Invalid API Key` → `400 Invalid login credentials`로 바뀐 것을 확인해
-   API 연결 자체는 정상임을 검증. **사용자가 실제 비밀번호로 로그인 성공까지 확인함.**
-   - 편집 중 Vercel의 "Environments" 드롭다운(Production/Preview/Development
-     선택)을 실수로 "Preview"만 남긴 채 저장할 뻔했음 — 값을 다 입력한 후 저장
-     직전에 **Environments가 여전히 "Production and Preview"인지 반드시 재확인**할 것.
-5. **알림설정 + 계정을 "마이페이지"(`/admin/mypage`)로 통합** (사용자 요청, 헤더
-   메뉴가 5개라 좁아 보인다는 피드백도 겸사겸사 해결). 기존 `/admin/notifications`,
-   `/admin/account` 라우트는 삭제, 로직은 `app/admin/(dashboard)/mypage/actions.ts`로
-   병합. 비밀번호 폼은 `useActionState`가 필요해 `components/admin/ChangePasswordForm.tsx`
-   클라이언트 컴포넌트로 분리(페이지 자체는 알림 설정 데이터를 불러와야 해서 서버
-   컴포넌트로 유지).
-6. **주의: 이 프로젝트 폴더가 OneDrive 동기화 폴더 안에 있다.** 세션 중 `Remove-Item
-   -Recurse -Force`로 지운 `app/admin/(dashboard)/account`,
-   `.../notifications` 폴더가 (git에서는 이미 삭제됐는데도) **파일시스템에
-   저절로 다시 나타나는 현상**을 겪음 — OneDrive가 삭제 직후의 로컬 상태를 클라우드
-   버전으로 되돌린 것으로 추정됨. 파일/폴더를 삭제한 직후에는 몇 초 기다렸다가
-   `Get-ChildItem`으로 실제로 없어졌는지 재확인하는 습관이 필요함. `npm run build`가
-   `.next/dev/types/routes.d.ts` 관련 이상한 TS 문법 에러를 내면(존재하지 않는
-   라우트를 참조하는 등) 십중팔구 이런 캐시/동기화 불일치이니 `.next` 폴더를
-   지우고 다시 빌드해볼 것.
+     플로우 전체**(`/book/[slug]` 링크 조회, 가용성 계산, 예약 생성)에도 쓰인다. 즉
+     이 버그가 있던 동안 배포 사이트에서는 로그인뿐 아니라 고객의 실제 예약 생성도
+     실패했을 가능성이 높음(사용자가 별도 확인했다고 함, 여기서 재확인은 생략함).
+5. **수정 방법**: Vercel 프로젝트 → Environment Variables에서 3개 값을
+   `.env.local`의 올바른 값으로 덮어쓰고 재배포. 일부러 틀린 비밀번호로 로그인해서
+   에러가 `401 Invalid API Key` → `400 Invalid login credentials`로 바뀐 것으로
+   API 연결 정상화를 검증(민감정보 자체는 화면에 노출 안 시킴). **사용자가 실제
+   비밀번호로 로그인 성공까지 최종 확인함.**
+6. **앞으로 Vercel 환경변수를 다시 만지게 되면**: 반드시 Supabase 대시보드의
+   **"Publishable and secret API keys" 탭**(Settings → API Keys, "Legacy" 탭
+   아님)에서 값을 복사할 것. Vercel의 "Sensitive" 값은 저장 후 다시 읽을 수 없고,
+   편집 화면에 보이는 값은 실제 저장된 값의 일부를 반영한 것일 수도, 완전히 무관한
+   placeholder일 수도 있어 신뢰할 수 없음(관찰: ANON_KEY/SERVICE_ROLE_KEY는 실제
+   값의 prefix를 보여줬지만, URL 필드는 `https://aBcDe.supabase.co` 같은 완전
+   무관한 예시였음) — **애매하면 그냥 새 값으로 덮어쓰는 게 안전.**
+7. 편집 중 Vercel의 "Environments" 드롭다운(Production/Preview/Development)을
+   실수로 "Preview"만 남긴 채 저장할 뻔한 적이 있음 — 값을 다 입력한 후 저장 직전에
+   **Environments가 여전히 "Production and Preview"인지 반드시 재확인**할 것.
 
-## 다음 단계 제안
+### 3-2. 이메일(Resend) 알림 미완성
+`.env.local`/Vercel 모두 `RESEND_API_KEY`, `RESEND_FROM_EMAIL`이 비어있어서
+`lib/notifications.ts`의 `sendEmailNotification`이 조건문에서 걸러져 호출조차 안 됨.
+**사용자가 Resend API 키 발급이 어렵다고 해서 이번 세션에서는 보류함.** 나중에 계정을
+만들면 두 값을 채우고 발송 테스트하면 됨.
 
-1. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
-   `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트. (사용자가 API 키 발급이
-   어렵다고 해서 이번엔 보류함 — 나중에 다시 시도 가능.)
-2. **Vercel Environment Variables를 다시 확인/수정할 일이 생기면, 반드시 Supabase
-   대시보드의 "Publishable and secret API keys" 탭(레거시 탭 아님)에서 값을 복사할
-   것.** 이번 세션의 근본 원인이 정확히 이 실수였음.
-3. 이 저장소는 이제 **로컬 git + GitHub(`jhj144/anpc-booking`, public) 둘 다에 존재**.
-   앞으로 변경사항은 로컬에서 커밋 후 `git push`까지 해야 GitHub에도 반영됨(로컬
-   커밋만으로는 GitHub에 안 올라감). **매번 push 전에 `git ls-files`로 시크릿
-   파일이 없는지 재확인할 것** — 사용자가 이 점을 특별히 강조함.
-4. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서
-   `npm run dev` 실행 전에 기존 프로세스가 떠 있는지 확인할 것
-   (`Get-NetTCPConnection -LocalPort 3000 -State Listen`). **이번 세션에서 실제로
-   두 개의 dev 서버 프로세스가 동시에 떠서 Turbopack이 낡은 코드로 응답하는 바람에
-   한참 헤맨 적이 있음** — 이상 동작이 보이면 제일 먼저 의심할 것.
-5. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
-   타임아웃되며 멈춘다(네이티브 모달이라 CDP Input 이벤트가 못 닿음). 이런 버튼을
-   검증해야 할 때는 클릭 전에 사용자에게 미리 알리고, 최종 확인 클릭은 사용자가 직접
-   하도록 요청할 것.
-6. `navigator.clipboard.writeText`를 실제로 호출하는 버튼을 검증할 땐, 클릭 전에
-   `javascript_tool`로 `navigator.clipboard.writeText`를 몽키패치해서 인자를 캡처하면
-   권한 프롬프트 없이 값을 확인할 수 있음(`readText` 방식은 권한 프롬프트로 막힘).
-7. 디스코드 웹훅 URL은 `notification_settings` 테이블(DB)에 저장되어 있음 — 코드나
-   `.env.local`에는 없음. URL 자체는 이 문서에도 기록하지 않았음(민감정보이므로
-   필요하면 Supabase Studio에서 직접 조회할 것).
-8. 이 프로젝트 폴더가 **OneDrive 동기화 폴더 안에 있다는 점**을 항상 염두에 둘 것
-   (7단계 항목 6 참고). 삭제한 파일/폴더가 되살아나거나, 이상한 빌드 캐시 에러가
-   나면 OneDrive 동기화 지연을 의심하고 재확인할 것.
+### 3-3. 자동 테스트 전무
+프로젝트에 unit/e2e 테스트가 전혀 없음. `lib/slots.ts`의 가용성 계산 로직(방금 슬롯
+간격 로직도 변경함)은 브라우저 수동 확인만 거쳤음 — 이 파일을 다시 건드릴 일이 있으면
+반드시 수동으로 캘린더를 재확인할 것.
+
+### 3-4. 개발 중 겪은 반복적인 기술적 함정 (다음에 또 만날 수 있음)
+- **React key 없이 조건부 입력 스위칭하면 DOM 재사용 버그 발생**: 예를 들어 select로
+  프리셋↔직접입력을 전환할 때 `<input type="hidden">`과 `<input type="number">`를
+  React가 같은 자리의 같은 태그로 보고 DOM을 재사용해 이전 값이 새 입력창에 남는
+  문제가 있었음. `key="preset"`/`key="custom"`처럼 명시적 key를 붙여서 해결. 조건부
+  입력 스위칭 패턴을 새로 만들 때는 처음부터 key를 붙일 것.
+- **`<form action={serverAction}>`은 제출 완료 후 폼을 네이티브로 자동 리셋**하는데,
+  이게 컨트롤드 state(체크박스 등)와 충돌해서 화면엔 리셋된 것처럼 보여도 내부 state는
+  안 바뀌어 다음 제출에 옛날 값이 나가는 버그가 있었음. 컨트롤드 input을 섞은 폼은
+  `<form onSubmit={...}>` + `e.preventDefault()` + 수동 `FormData` 구성 +
+  `startTransition`으로 서버 액션을 직접 호출하는 방식을 쓸 것.
+- **`useActionState`가 반환하는 dispatch 함수를 `<form action={...}>`이 아니라
+  수동으로(`onSubmit` 안에서) 호출할 때는 반드시 `startTransition`으로 감쌀 것.**
+  안 그러면 "An async function with useActionState was called outside of a
+  transition" 경고가 뜨고 `isPending`이 갱신 안 됨.
+- **`window.confirm()`을 쓰는 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
+  타임아웃되며 멈춘다**(네이티브 모달이라 CDP Input 이벤트가 안 닿음). 이런 버튼
+  검증 시엔 클릭 전에 사용자에게 미리 알리고, 최종 확인 클릭은 사용자가 직접 하도록
+  요청할 것.
+- **`navigator.clipboard.writeText` 검증**: 클릭 전에 `javascript_tool`로
+  `navigator.clipboard.writeText`를 몽키패치해서 인자를 캡처하면 권한 프롬프트 없이
+  값을 확인할 수 있음(`readText` 방식은 권한 프롬프트로 CDP가 막힘).
+- **개발 서버 중복 실행 주의**: 세션 중 실제로 두 개의 `npm run dev` 프로세스가
+  동시에 떠서 Turbopack이 낡은 코드로 응답하는 바람에 한참 헤맨 적이 있음. 새 세션
+  시작 시 `npm run dev` 실행 전에
+  `Get-NetTCPConnection -LocalPort 3000 -State Listen`으로 기존 프로세스가 떠 있는지
+  확인할 것. 이상 동작(고친 코드가 반영 안 되는 것처럼 보임)이 보이면 제일 먼저 의심.
+- **이 프로젝트 폴더가 OneDrive 동기화 폴더 안에 있음.** `Remove-Item -Recurse
+  -Force`로 지운 폴더(`app/admin/(dashboard)/account`, `.../notifications`)가
+  git에서는 이미 삭제됐는데도 **파일시스템에 저절로 다시 나타나는 현상**을 겪음
+  (OneDrive가 삭제 직후 상태를 클라우드 버전으로 되돌린 것으로 추정). 파일/폴더 삭제
+  직후엔 몇 초 기다렸다가 `Get-ChildItem`으로 실제로 없어졌는지 재확인할 것.
+  `npm run build`가 `.next/dev/types/routes.d.ts` 관련 이상한 TS 문법 에러를
+  내면(존재하지 않는 라우트를 참조하는 등) 십중팔구 이런 캐시/동기화 불일치이니
+  `.next` 폴더를 지우고 다시 빌드해볼 것.
+- 디스코드 웹훅 URL은 `notification_settings` 테이블(DB)에 저장되어 있음 — 코드나
+  `.env.local`에는 없음. 민감정보라 이 문서에도 URL 자체는 기록하지 않음(필요하면
+  Supabase Studio에서 직접 조회).
+
+## 4. 다음 단계 제안
+
+1. (선택) 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 Vercel
+   환경변수에 `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트.
+2. **방금 배포한 "슬롯 1시간 고정 간격" 변경을 사용자가 아직 배포 사이트에서
+   최종 확인 전** — 확인 결과를 기다릴 것. 문제가 있다면 `lib/slots.ts`의
+   `SLOT_INTERVAL_MINUTES` 상수를 조정.
+3. 자동 테스트(특히 `lib/slots.ts` 가용성 계산)를 추가하면 앞으로 이런 로직을
+   건드릴 때 수동 브라우저 확인 의존도를 줄일 수 있음 — 아직 손대지 않음.
+4. push 전에는 항상 `git ls-files | Select-String -Pattern "env" -CaseSensitive:$false`
+   같은 명령으로 시크릿 파일이 트래킹 안 됐는지 재확인할 것(`.env.example`만 있어야
+   정상). **사용자가 이 점을 여러 번 특별히 강조함.**
+5. 3-4번의 기술적 함정들(특히 OneDrive 동기화, dev 서버 중복 실행, Vercel legacy
+   API 키)은 이 프로젝트에서 반복적으로 발생할 여지가 있으니 새 세션 시작 시 한 번씩
+   염두에 둘 것.
