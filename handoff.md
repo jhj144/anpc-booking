@@ -91,8 +91,6 @@
 
 ## 시도했지만 검증하지 못한 것 / 실패한 것
 
-- **디스코드 웹훅 알림 실제 발송**은 미검증. `notification_settings`에 실제 웹훅 URL을
-  넣고 예약을 발생시켜 디스코드 채널에 메시지가 도착하는지 아직 안 봤음.
 - **이메일 알림(Resend)**은 아예 비활성 상태. `.env.local`에 `RESEND_API_KEY`,
   `RESEND_FROM_EMAIL`이 비어있어서 `lib/notifications.ts`의 `sendEmailNotification`이
   조건문(`if (params.emailEnabled && ... && process.env.RESEND_API_KEY)`)에서 걸러져
@@ -173,24 +171,39 @@
 이번에 템플릿을 연결해준 상태로 남아있음. 세션 도중 사용자가 별도로 실제 링크
 (`[리빔] 사전미팅`)를 직접 만든 것으로 보이는데, 이건 내가 건드리지 않음.
 
+## 5단계 — 예약 현황 배지 + 디스코드 웹훅 실발송 검증 (전부 완료)
+
+1. **예약 링크 목록에 "예약 전"/"예약 완료" 배지 추가** (사용자 요청) — 체크박스 옆에
+   표시. `app/admin/(dashboard)/page.tsx`에서 `bookings`를 `status=confirmed` 조건으로
+   한 번 더 조회해 `booking_link_id` Set을 만들고, `BookingLinkCard`에 `hasBooking`으로
+   내려서 초록/회색 배지로 렌더링. 실제 데이터(`[리빔] 사전미팅`이 이미 예약 있음)로
+   검증 완료.
+2. **디스코드 웹훅 알림 실제 발송 검증 완료** — 사용자가 실제 디스코드 웹훅 URL을
+   발급받아 전달, `/admin/notifications`에서 켜고 저장 → 임시 가능시간 하루 열고
+   고객 예약 페이지에서 실제 예약 생성 → **사용자가 디스코드 채널에서 알림 수신 확인**.
+   테스트에 썼던 임시 가능시간과 예약은 정리했고, **디스코드 웹훅 설정(URL, 활성화)은
+   실제 설정으로 그대로 저장되어 있음** — 이제부터 이 프로젝트에서 예약이 들어올 때마다
+   실제로 디스코드 알림이 감. 이메일 알림은 여전히 미설정 상태(`RESEND_API_KEY` 없음).
+
 ## 다음 단계 제안
 
 1. (우선순위 높음) **가능시간을 아직 하나도 설정 안 했으므로**, 배포/실사용 전에
    `/admin/schedule`에서 실제 요일별 가능시간을 등록할 것.
-2. 디스코드 웹훅 URL을 실제로 발급받아 `/admin/notifications`에서 켜고 테스트 예약을
-   만들어 실제 발송을 확인.
-3. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
+2. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
    `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트.
-4. PRD 2번 항목의 "Deploy to Vercel 버튼" 배포 자동화는 아직 손대지 않았음.
-5. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서
+3. PRD 2번 항목의 "Deploy to Vercel 버튼" 배포 자동화는 아직 손대지 않았음.
+4. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서
    `npm run dev` 실행 전에 기존 프로세스가 떠 있는지 확인할 것
    (`Get-NetTCPConnection -LocalPort 3000 -State Listen`). **이번 세션에서 실제로
    두 개의 dev 서버 프로세스가 동시에 떠서 Turbopack이 낡은 코드로 응답하는 바람에
    한참 헤맨 적이 있음** — 이상 동작이 보이면 제일 먼저 의심할 것.
-6. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
+5. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
    타임아웃되며 멈춘다(네이티브 모달이라 CDP Input 이벤트가 못 닿음). 이런 버튼을
    검증해야 할 때는 클릭 전에 사용자에게 미리 알리고, 최종 확인 클릭은 사용자가 직접
    하도록 요청할 것.
-7. `navigator.clipboard.writeText`를 실제로 호출하는 버튼을 검증할 땐, 클릭 전에
+6. `navigator.clipboard.writeText`를 실제로 호출하는 버튼을 검증할 땐, 클릭 전에
    `javascript_tool`로 `navigator.clipboard.writeText`를 몽키패치해서 인자를 캡처하면
    권한 프롬프트 없이 값을 확인할 수 있음(`readText` 방식은 권한 프롬프트로 막힘).
+7. 디스코드 웹훅 URL은 `notification_settings` 테이블(DB)에 저장되어 있음 — 코드나
+   `.env.local`에는 없음. URL 자체는 이 문서에도 기록하지 않았음(민감정보이므로
+   필요하면 Supabase Studio에서 직접 조회할 것).
