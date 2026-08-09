@@ -107,6 +107,34 @@
 - 이 저장소는 **git 저장소가 아님** (`git status` → "not a git repository"). 지금까지의
   모든 변경이 커밋되지 않은 로컬 파일 상태로만 존재함. 배포 전에 `git init` + 커밋 필요.
 
+## 3단계에서 한 일 (전부 완료, 실제 DB/브라우저 검증 완료)
+
+1. **git 저장소 초기화 + 첫 커밋** — 이전에는 git 저장소가 아니었음. `.env.local`이
+   `.gitignore`에 걸려 있어 시크릿은 커밋되지 않음을 `git ls-files`로 재확인 후 진행.
+2. **일정관리 "가능시간 추가" 날짜 입력을 인라인 범위 캘린더로 교체** —
+   `components/admin/AvailableRuleForm.tsx` 신설. 기존엔 `<input type="date">`를
+   눌러야(그것도 달력 아이콘만) 팝업이 떴는데, 이제 폼 안에 항상 펼쳐진 캘린더가 있고
+   두 번 클릭(시작일→종료일)으로 범위를 선택함. 요일 체크박스도 컨트롤드 상태로 전환.
+   **버그를 하나 만들었다가 그 자리에서 고침**: Next.js는 `<form action={serverAction}>`
+   제출이 끝나면 폼을 네이티브로 자동 리셋하는데, 이게 컨트롤드 체크박스(React state)와
+   충돌해서 제출 후 체크박스가 시각적으로만 해제되고 내부 state는 그대로 남는 문제가
+   있었음(다시 제출하면 실제로는 빈 값이 나갈 위험). `<form onSubmit={...}>` +
+   `e.preventDefault()` + 수동으로 `FormData`를 구성해 `startTransition`으로 서버
+   액션을 직접 호출하는 방식으로 바꿔서 해결. **앞으로 서버 액션을 쓰는 폼에 컨트롤드
+   input을 섞을 때는 이 자동 리셋 문제를 염두에 둘 것.**
+3. **예약 링크 삭제 기능 추가**:
+   - `deleteBookingLink(id)`/`deleteBookingLinks(ids[])` 서버 액션
+     (`links/actions.ts`). `bookings.booking_link_id`가 `on delete cascade`라서
+     링크를 지우면 연결된 예약 내역도 함께 삭제됨 — 그래서 `window.confirm()`으로
+     경고 문구를 띄운 후 진행하도록 함.
+   - 상세 페이지(`links/[id]/page.tsx`)에는 `DeleteLinkButton`으로 단일 삭제.
+   - 목록 페이지(`app/admin/(dashboard)/page.tsx`)는 사용자 요청으로 처음엔 카드마다
+     즉시삭제 버튼이었다가, **체크박스로 여러 개 선택 후 한 번에 "선택 삭제"하는 방식으로
+     변경**. `components/admin/BookingLinksList.tsx`가 선택 상태를 관리하고
+     `BookingLinkCard`는 체크박스 UI만 담당(자체 삭제 버튼 없음).
+   - `window.confirm()`은 브라우저 자동화(CDP)가 다루지 못하고 멈춰버려서, 최종
+     클릭 확인은 사용자가 직접 브라우저에서 수행함(단일 삭제, 일괄 삭제 둘 다 확인 완료).
+
 ## 다음 단계 제안
 
 1. (우선순위 높음) 디스코드 웹훅 URL을 실제로 발급받아 `/admin/notifications`에서 켜고
@@ -115,10 +143,13 @@
    맞는지 확인.
 3. 이메일 알림을 쓸 계획이면 Resend 계정 생성 후 `.env.local`과 배포 환경변수에
    `RESEND_API_KEY`/`RESEND_FROM_EMAIL` 등록, 발송 테스트.
-4. git 저장소 초기화 + 첫 커밋 (`.gitignore`는 이미 있음). PRD 2번 항목의 "Deploy to Vercel
-   버튼" 배포 자동화는 아직 손대지 않았음.
+4. PRD 2번 항목의 "Deploy to Vercel 버튼" 배포 자동화는 아직 손대지 않았음.
 5. `available_rules` "가능시간 추가" 폼으로 요일 여러 개를 한 번에 열면 리스트에 요일별로
    한 줄씩 따로 표시됨(의도적 트레이드오프, PR 참고). 실사용 중 목록이 지저분하다는
    피드백이 오면 같은 기간+시간대의 규칙들을 화면에서만 묶어서 보여주는 것을 고려.
 6. 개발 서버가 백그라운드에서 계속 실행 중일 수 있음(포트 3000). 새 세션에서 `npm run dev`
    실행 전에 기존 프로세스가 떠 있는지 확인할 것(`Get-NetTCPConnection -LocalPort 3000`).
+7. `window.confirm()`을 쓰는 삭제류 버튼은 claude-in-chrome 자동화로 클릭하면 CDP가
+   타임아웃되며 멈춘다(네이티브 모달이라 CDP Input 이벤트가 못 닿음). 이런 버튼을
+   검증해야 할 때는 클릭 전에 사용자에게 미리 알리고, 최종 확인 클릭은 사용자가 직접
+   하도록 요청할 것.
