@@ -11,6 +11,7 @@ interface LinkItem {
   rangeStartDate: string;
   rangeEndDate: string;
   shareUrl: string;
+  hasBooking: boolean;
 }
 
 interface BookingLinksListProps {

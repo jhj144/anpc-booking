@@ -9,12 +9,16 @@ export default async function AdminHomePage() {
   const user = await requireAdmin();
   const supabase = await createClient();
 
-  const { data: links } = await supabase
-    .from("booking_links")
-    .select("id, slug, name, status, duration_minutes, range_start_date, range_end_date")
-    .eq("admin_id", user.id)
-    .order("created_at", { ascending: false });
+  const [{ data: links }, { data: confirmedBookings }] = await Promise.all([
+    supabase
+      .from("booking_links")
+      .select("id, slug, name, status, duration_minutes, range_start_date, range_end_date")
+      .eq("admin_id", user.id)
+      .order("created_at", { ascending: false }),
+    supabase.from("bookings").select("booking_link_id").eq("admin_id", user.id).eq("status", "confirmed"),
+  ]);
 
+  const bookedLinkIds = new Set((confirmedBookings ?? []).map((b) => b.booking_link_id));
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   return (
@@ -40,6 +44,7 @@ export default async function AdminHomePage() {
             rangeStartDate: link.range_start_date,
             rangeEndDate: link.range_end_date,
             shareUrl: `${appUrl}/book/${link.slug}`,
+            hasBooking: bookedLinkIds.has(link.id),
           }))}
           onBulkDelete={deleteBookingLinks}
         />

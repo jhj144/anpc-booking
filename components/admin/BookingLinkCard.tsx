@@ -13,6 +13,7 @@ interface BookingLinkCardProps {
   rangeStartDate: string;
   rangeEndDate: string;
   shareUrl: string;
+  hasBooking: boolean;
   selected: boolean;
   onToggleSelect: () => void;
 }
@@ -25,6 +26,7 @@ export function BookingLinkCard({
   rangeStartDate,
   rangeEndDate,
   shareUrl,
+  hasBooking,
   selected,
   onToggleSelect,
 }: BookingLinkCardProps) {
@@ -46,6 +48,13 @@ export function BookingLinkCard({
           className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-navy"
           aria-label={`${name} 선택`}
         />
+        <span
+          className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+            hasBooking ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          {hasBooking ? "예약 완료" : "예약 전"}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div>
